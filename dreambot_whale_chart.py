@@ -909,9 +909,9 @@ def whales_chart_wrapper(
 
         # attempt geckoterminal search
         geckoterminal_status_code,token_dict = geckoterminal_metadata_search(
-            chain_text_geckoterminal
-            ,contract_address
-            ,verbose=verbose
+            chain_text_geckoterminal,
+            contract_address,
+            verbose=verbose
         )
         if geckoterminal_status_code != 200:
 
@@ -960,7 +960,8 @@ def whales_chart_wrapper(
     upload_transfers_to_bigquery(
             transfers_df,
             chain_text_dune,
-            contract_address
+            contract_address,
+            decimals=token_dict['decimals']
         )
 
     # convert transfer data into daily counts of wallets by size
@@ -984,14 +985,14 @@ def whales_chart_wrapper(
         if verbose:
             print('drawing chart...')
         whale_chart = draw_whale_chart(
-            whales_df
-            ,whale_threshold_usd
-            ,whale_threshold_tokens
-            ,shrimp_threshold_usd
-            ,shrimp_threshold_tokens
-            ,days_of_history
-            ,token_dict
-            ,verbose=verbose
+            whales_df,
+            whale_threshold_usd,
+            whale_threshold_tokens,
+            shrimp_threshold_usd,
+            shrimp_threshold_tokens,
+            days_of_history,
+            token_dict,
+            verbose=verbose
             )
 
         # storing image in gcs
