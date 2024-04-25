@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.io as pio
 from dotenv import load_dotenv
+import logging
 from PIL import Image, ImageOps
 from google.cloud import bigquery
 from google.cloud import storage
@@ -22,8 +23,9 @@ from dune_client.query import QueryBase
 from google.cloud import secretmanager_v1
 import google.auth
 from google.oauth2 import service_account
+import functions_framework
 import pandas_gbq
-import logging
+from dreams_core import core as dc
 
 '''
 
@@ -78,84 +80,7 @@ def gcs_load_image(
     blob = bucket.blob(filepath)
     image = Image.open(blob.open('rb'))
 
-    return(image)
-
-
-def get_secret(
-        secret_name,
-        service_account_path=None,
-        project_id='954736581165',
-        version='latest'
-    ):
-    '''
-    Retrieves a secret from GCP Secrets Manager.
-
-    Parameters:
-    secret_name (str): The name of the secret in Secrets Manager.
-    service_account_path (str, optional): Path to the service account JSON file.
-    version (str): The version of the secret to be loaded.
-
-    Returns:
-    str: The value of the secret.
-    '''
-    
-    # Construct the resource name of the secret version.
-    secret_path = f'projects/{project_id}/secrets/{secret_name}/versions/{version}'
-
-    # Initialize the Google Secret Manager client
-    client = initialize_secret_manager_client(service_account_path)
-
-    # Request to access the secret version
-    request = secretmanager_v1.AccessSecretVersionRequest(name=secret_path)
-    response = client.access_secret_version(request=request)
-    return response.payload.data.decode('UTF-8')
-
-
-def initialize_secret_manager_client(service_account_path):
-    '''
-    Initialize the Secret Manager client with the appropriate credentials.
-
-    Parameters:
-    service_account_path (str): Path to the service account JSON file.
-
-    Returns:
-    SecretManagerServiceClient: A client for the Secret Manager Service.
-    '''
-    if service_account_path:
-        # Explicitly use the provided service account file for credentials
-        credentials = service_account.Credentials.from_service_account_file(service_account_path)
-    else:
-        # Attempt to use default credentials
-        credentials, _ = google.auth.default()
-
-    return secretmanager_v1.SecretManagerServiceClient(credentials=credentials)
-
-
-def human_format(num):
-    '''
-    converts a number to a scaled human readable string (e.g 7437283-->7.4M)
-
-    TODO: the num<1 code should technically round upwards when truncating the
-    string, e.g. 0.0678 right now will display as 0.067 but should be 0.068
-
-    param: num <numeric>: the number to be reformatted
-    return: formatted_number <string>: the number formatted as a human-readable string
-    '''
-    if num < 1:
-        # decimals are output with enough precision to show two non-0 numbers
-        num = np.format_float_positional(num, trim='-')
-        after_decimal = str(num[2:])
-        keep = 4+len(after_decimal) - len(after_decimal.lstrip('0'))
-        num = num[:keep]
-    else:
-        num = float('{:.3g}'.format(num))
-        magnitude = 0
-        while abs(num) >= 1000:
-            magnitude += 1
-            num /= 1000.0
-        num='{}{}'.format('{:f}'.format(num).rstrip('0').rstrip('.'), ['','k','m','B','T','QA','QI','SX','SP','O','N','D'][magnitude])
-
-    return(num)
+    return image
 
 
 def run_bigquery_sql(
@@ -215,8 +140,6 @@ def gcs_upload_file(
         os.remove(local_file)
 
     return(whale_chart_url)
-
-
 
 
 # WHALE WATCH SPECIFIC FUNCTIONS
@@ -287,15 +210,13 @@ def lookup_chain_ids(
 
 
 def coingecko_metadata_search(
-        coingecko_api_key
-        ,blockchain
-        ,address
-        ,verbose=False
+        blockchain,
+        address,
+        verbose=False
     ):
     '''
     attempts to look up a coin on coingecko and store its metadata in gcs
 
-    param: coingecko_api_key <string>
     param: blockchain <string> this must match chain_text_coingecko from core.chains
     param: address <string> token contract address
     return: api_status_code <int> geckoterminal api status code
@@ -304,7 +225,7 @@ def coingecko_metadata_search(
     token_dict = {}
 
     # making the api call
-    headers = {'x_cg_pro_api_key': coingecko_api_key}
+    headers = {'x_cg_pro_api_key': os.environ['COINGECKO_API_KEY']}
     url = 'https://api.coingecko.com/api/v3/coins/'+blockchain+'/contract/'+address
     response = requests.request("GET", url, headers=headers)
     response_data = json.loads(response.text)
@@ -419,7 +340,6 @@ def geckoterminal_metadata_search(
     return(api_response_code,token_dict)
 
 
-
 def dune_get_token_transfers(
         chain_text_dune,
         contract_address,
@@ -445,7 +365,7 @@ def dune_get_token_transfers(
     transfers_query = QueryBase(
         query_id=query_id,
         params=[
-            QueryParameter.text_type(name='blockchain_name', value=blockchain_name),
+            QueryParameter.text_type(name='blockchain_name', value=chain_text_dune),
             QueryParameter.text_type(name='contract_address', value=contract_address),
             QueryParameter.number_type(name='decimals', value=decimals),
         ]
@@ -476,11 +396,21 @@ def get_whale_counts_from_transfers(
         pandas.DataFrame: df of daily s/m/whale wallet counts
     '''
 
-    # sort and calculate cumulative balances
+    # calculate daily balances for each wallet by summing daily net transfers
     whales_df = transfers_df.sort_values(['wallet_address', 'date'])
+    whales_df['date'] = pd.to_datetime(whales_df['date'])
     whales_df['balance'] = whales_df.groupby('wallet_address')['daily_net_transfers'].cumsum()
 
-    # Function to classify each balance
+    # ensure a row exists for each wallet-date, even if the wallet balance doesn't change on that date
+    whales_df.set_index('date', inplace=True)
+    max_date = whales_df.index.max()
+    whales_df = whales_df.groupby('wallet_address').apply(
+        lambda group: group.reindex(pd.date_range(start=group.index.min(), end=max_date, freq='D'), method='ffill')
+    )
+    whales_df = whales_df.drop('wallet_address', axis=1).reset_index().rename(columns={'level_1': 'date'})
+
+
+    # Function to classify each balance between whale/med/small
     def classify_balance(row):
         if row['balance'] >= whale_threshold_tokens:
             return 'whale_wallets'
@@ -489,16 +419,14 @@ def get_whale_counts_from_transfers(
         else:
             return 'medium_wallets'
 
-    # Apply the classification
     whales_df['wallet_type'] = whales_df.apply(classify_balance, axis=1)
+
 
     # Group by 'date' and 'wallet_type' and count each type, then unstack to create columns for each wallet type
     whales_df = whales_df.groupby(['date', 'wallet_type']).size().unstack(fill_value=0)
 
     # Ensure all wallet types and dates are present in the DataFrame, even if they have zero counts
     whales_df = whales_df.reindex(columns=['whale_wallets', 'medium_wallets', 'small_wallets'], fill_value=0)
-
-    whales_df.index = pd.to_datetime(whales_df.index)
     whales_df = whales_df.resample('D').ffill()
 
     return whales_df
@@ -508,6 +436,7 @@ def upload_transfers_to_bigquery(
         transfers_df,
         chain_text_dune,
         contract_address,
+        decimals,
         verbose=False
     ):
     '''
@@ -539,7 +468,13 @@ def upload_transfers_to_bigquery(
             print(f'uploading {str(len(transfers_df))} records for <{chain_text_dune}:{contract_address}>')
         
         # add metadata to upload_df
-        upload_df = transfers_df.rename(columns={'chain': 'chain_text_source'})
+        upload_df = pd.DataFrame()
+        upload_df['date'] = transfers_df['date']
+        upload_df['chain_text_source'] = chain_text_dune
+        upload_df['token_address'] = contract_address
+        upload_df['decimals'] = decimals
+        upload_df['wallet_address'] = transfers_df['wallet_address']
+        upload_df['daily_net_transfers'] = transfers_df['daily_net_transfers']
         upload_df['data_source'] = 'dune'
         upload_df['data_updated_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
@@ -645,10 +580,10 @@ def draw_whale_chart(
     if len(coin_reference) > 25:
         coin_reference = coin_reference[:23]+'...'
     current_price = token_dict['price']
-    mc = human_format(token_dict['mc'])
+    mc = dc.human_format(token_dict['mc'])
     if mc == '0':
         mc = 'Unknown'
-    fdv = human_format(token_dict['fdv'])
+    fdv = dc.human_format(token_dict['fdv'])
 
     if verbose: 
         print('charting: adding annotations...')
@@ -663,14 +598,14 @@ def draw_whale_chart(
     )
     # add annotations
     fig.add_annotation(
-        text=str('Whale Threshold: $'+human_format(whale_threshold_usd)+' USD').replace('$','&#36;'),
+        text=str('Whale Threshold: $'+dc.human_format(whale_threshold_usd)+' USD').replace('$','&#36;'),
         font=dict(size=24),
         xref='paper', yref='paper',
         x=0.040, y=1.06,
         showarrow=False
     )
     fig.add_annotation(
-        text=str('Current Price: $'+human_format(current_price)+' USD').replace('$','&#36;'),
+        text=str('Current Price: $'+dc.human_format(current_price)+' USD').replace('$','&#36;'),
         font=dict(size=24),
         xref='paper', yref='paper',
         xanchor='right',
@@ -720,7 +655,7 @@ def draw_whale_chart(
         go.Scatter(
             x=query_df['date'],
             y=query_df['small_wallets'],
-            name=f'Small Wallets (<{human_format(shrimp_threshold_tokens)} {symbol} (${human_format(shrimp_threshold_usd)} USD today)'.replace('$','&#36;'),
+            name=f'Small Wallets (<{dc.human_format(shrimp_threshold_tokens)} {symbol} (${dc.human_format(shrimp_threshold_usd)} USD today)'.replace('$','&#36;'),
             line=dict(
                 color='#a9a9a9',
                 width=2
@@ -733,7 +668,7 @@ def draw_whale_chart(
         go.Scatter(
             x=query_df['date'],
             y=query_df['medium_wallets'],
-            name=f'Medium Wallets (<{human_format(whale_threshold_tokens)} {symbol} (${human_format(whale_threshold_usd)} USD today)'.replace('$','&#36;'),
+            name=f'Medium Wallets (<{dc.human_format(whale_threshold_tokens)} {symbol} (${dc.human_format(whale_threshold_usd)} USD today)'.replace('$','&#36;'),
             line=dict(
                 color='#71368A',
                 width=4
@@ -746,7 +681,7 @@ def draw_whale_chart(
         go.Scatter(
             x=query_df['date'],
             y=query_df['whale_wallets'],
-            name=f'Whale Wallets (>={human_format(whale_threshold_tokens)} {symbol} (${human_format(whale_threshold_usd)} USD today)'.replace('$','&#36;'),
+            name=f'Whale Wallets (>={dc.human_format(whale_threshold_tokens)} {symbol} (${dc.human_format(whale_threshold_usd)} USD today)'.replace('$','&#36;'),
             line=dict(
                 color='#00FFFF',
                 width=6
@@ -833,7 +768,7 @@ def draw_whale_chart(
     # files it will improve overall command response times
     if verbose: 
         print('charting: adding border...')
-        
+
     # duct tape method to apply a green border to the image
     fig.write_image('whale_chart_temp.png',engine='kaleido')
     whale_chart = Image.open('whale_chart_temp.png')
@@ -843,7 +778,7 @@ def draw_whale_chart(
     if verbose:
         print('generated whale_chart_temp.png.')
 
-    return(whale_chart)
+    return whale_chart
 
 
 def log_whale_chart_request(
@@ -897,17 +832,15 @@ def log_whale_chart_request(
 
 
 def whales_chart_wrapper(
-        coingecko_api_key
-        ,blockchain_name
-        ,contract_address
-        ,days_of_history
-        ,whale_threshold_usd
-        ,whale_threshold_tokens
-        ,verbose=False
+        blockchain_name,
+        contract_address,
+        days_of_history,
+        whale_threshold_usd,
+        whale_threshold_tokens,
+        verbose=False
     ):
     '''
     wrapper that runs all functions necessary to return the whale chart image
-    param: coingecko_api_key <string> retreived secret
     param: blockchain_name <string> user input blockchain
     param: contract_address <string> user input address
     param: days_of_history <int> user input days of history to query in dune
@@ -966,10 +899,9 @@ def whales_chart_wrapper(
     # that breaks the code, e.g. '0x39142c18b6db2a8a41b7018f49e1478837560cad' on 'eth'
     try:
         coingecko_status_code,token_dict = coingecko_metadata_search(
-            coingecko_api_key
-            ,chain_text_coingecko
-            ,contract_address
-            ,verbose
+            chain_text_coingecko,
+            contract_address,
+            verbose
         )
     except:
         coingecko_status_code = 400
@@ -977,9 +909,9 @@ def whales_chart_wrapper(
 
         # attempt geckoterminal search
         geckoterminal_status_code,token_dict = geckoterminal_metadata_search(
-            chain_text_geckoterminal
-            ,contract_address
-            ,verbose=verbose
+            chain_text_geckoterminal,
+            contract_address,
+            verbose=verbose
         )
         if geckoterminal_status_code != 200:
 
@@ -1028,7 +960,8 @@ def whales_chart_wrapper(
     upload_transfers_to_bigquery(
             transfers_df,
             chain_text_dune,
-            contract_address
+            contract_address,
+            decimals=token_dict['decimals']
         )
 
     # convert transfer data into daily counts of wallets by size
@@ -1052,14 +985,14 @@ def whales_chart_wrapper(
         if verbose:
             print('drawing chart...')
         whale_chart = draw_whale_chart(
-            whales_df
-            ,whale_threshold_usd
-            ,whale_threshold_tokens
-            ,shrimp_threshold_usd
-            ,shrimp_threshold_tokens
-            ,days_of_history
-            ,token_dict
-            ,verbose=verbose
+            whales_df,
+            whale_threshold_usd,
+            whale_threshold_tokens,
+            shrimp_threshold_usd,
+            shrimp_threshold_tokens,
+            days_of_history,
+            token_dict,
+            verbose=verbose
             )
 
         # storing image in gcs
@@ -1087,7 +1020,7 @@ def whales_chart_wrapper(
     return(api_response_code,function_result_summary,function_result_detail,discord_message,dune_total_time,dune_execution_time)
 
 
-import functions_framework
+
 @functions_framework.http
 def request_whales_chart(request):
     """HTTP Cloud Function.
@@ -1101,45 +1034,21 @@ def request_whales_chart(request):
         api_response_code <int> the api code of the function run
     """
 
-    # ########## CLOUD FUNCTIONS VARIABLES ##############
-    # # turn these on when the code is run as a cloud function
-    # os.environ['DUNE_API_KEY'] = os.environ.get('dune_api_key')
-    # coingecko_api_key = os.environ.get('coingecko_api_key')
-    # request_json = request.get_json(silent=True)
-    # verbose=False
- 
+    # valid in google cloud function environment
+    try:
+        request_json = request.get_json(silent=True)
+        verbose=False
 
-    ########## NOTEBOOK DEV VARIABLES ##############
-    # turn these on when the code is run in a notebook
-
-    load_dotenv()  # Load environment variables from .env file at the start of your application
-    os.environ['DUNE_API_KEY'] = get_secret('apikey_dune_whale_watch')
-    coingecko_api_key = get_secret('apikey_coingecko_tentabs_free')
-    request_json = {
-        # 'blockchain': 'solana'
-        'blockchain': 'ethereum'
-        # 'blockchain': 'avalanche'
-
-        # ,'address': '947tEoG318GUmyjVYhraNRvWpMX7fpBTDQFBoJpipvSkSG3' # solchat sol
-        # ,'address': 'AVLhahDcDQ4m4vHM4ug63oh7xc8Jtk49Dm5hoe9Sazqr' # solama sol
-        # # ,'address': 'EJPtJEDogxzDbvM8qvAsqYbLmPj5n1vQeqoAzj9Yfv3q' # bozo sol
-        # ,'address': 'B5LMXiuvbB5jN3auECUtdfyeFWm27krgFinrBrqJGFRM' #cern sol
-        ,'address': '0x6982508145454ce325ddbe47a25d4ec3d2311933' # pepe eth
-        # ,'address': '0x88f89be3e9b1dc1c5f208696fb9cabfcc684bd5f' # something avax
-
-        # ,'address': 'yyx8fCqokZoTN6mhw9MvFT5m57bwvSZUxbCA1THdHnB' # open input
-        
-        ,'whale_threshold_usd': 30000
-        # ,'whale_threshold_tokens': 1000000
-        # ,'days_of_history': 90
-    }
-    request_json['submitted_by'] = 'dev'
-    verbose=True
+    # valid for testing scenarios where a dictionary is fed into the function
+    except AttributeError:
+        if isinstance(request, dict):
+            request_json = request
+            verbose=True
 
 
     ### USER VARIABLE PARSING
     '''
-    # dreambot input validation rules
+    dreambot input validation rules
         blockchain: string
         address: string 
         whale_threshold_usd: int
@@ -1184,13 +1093,12 @@ def request_whales_chart(request):
 
     # run whale chart function
     api_response_code,function_result_summary,function_result_detail,discord_message,dune_total_time,dune_execution_time = whales_chart_wrapper(
-        coingecko_api_key
-        ,blockchain_name
-        ,contract_address
-        ,days_of_history
-        ,whale_threshold_usd
-        ,whale_threshold_tokens
-        ,verbose
+        blockchain_name,
+        contract_address,
+        days_of_history,
+        whale_threshold_usd,
+        whale_threshold_tokens,
+        verbose
     )
 
     # log function performance
@@ -1198,20 +1106,20 @@ def request_whales_chart(request):
     processing_time = end_time - start_time
     discord_message = discord_message + ' ['+str(round(processing_time))+' seconds]'
     log_whale_chart_request(
-        submitted_by
-        ,blockchain_name
-        ,contract_address
-        ,whale_threshold_usd
-        ,days_of_history
-        ,api_response_code
-        ,function_result_summary
-        ,function_result_detail
-        ,processing_time
-        ,dune_total_time
-        ,dune_execution_time
-        ,request_json
-        ,verbose
+        submitted_by,
+        blockchain_name,
+        contract_address,
+        whale_threshold_usd,
+        days_of_history,
+        api_response_code,
+        function_result_summary,
+        function_result_detail,
+        processing_time,
+        dune_total_time,
+        dune_execution_time,
+        request_json,
+        verbose
     )
     print(f'whale watch finished after {str(round(processing_time))}s ({round(dune_total_time)}s querying): <{str(api_response_code)}: {function_result_summary}: {function_result_detail}>')
 
-return ([function_result_summary,function_result_detail,discord_message],api_response_code)
+    return ([function_result_summary,function_result_detail,discord_message],api_response_code)
