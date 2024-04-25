@@ -1037,12 +1037,13 @@ def request_whales_chart(request):
     # valid in google cloud function environment
     try:
         request_json = request.get_json(silent=True)
+        verbose=False
 
     # valid for testing scenarios where a dictionary is fed into the function
     except AttributeError:
         if isinstance(request, dict):
             request_json = request
-    verbose=True
+            verbose=True
 
 
     ### USER VARIABLE PARSING
