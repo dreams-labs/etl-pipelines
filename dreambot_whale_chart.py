@@ -445,7 +445,7 @@ def dune_get_token_transfers(
     transfers_query = QueryBase(
         query_id=query_id,
         params=[
-            QueryParameter.text_type(name='blockchain_name', value=blockchain_name),
+            QueryParameter.text_type(name='blockchain_name', value=chain_text_dune),
             QueryParameter.text_type(name='contract_address', value=contract_address),
             QueryParameter.number_type(name='decimals', value=decimals),
         ]
@@ -1101,40 +1101,40 @@ def request_whales_chart(request):
         api_response_code <int> the api code of the function run
     """
 
-    # ########## CLOUD FUNCTIONS VARIABLES ##############
-    # # turn these on when the code is run as a cloud function
-    # os.environ['DUNE_API_KEY'] = os.environ.get('dune_api_key')
-    # coingecko_api_key = os.environ.get('coingecko_api_key')
-    # request_json = request.get_json(silent=True)
-    # verbose=False
+    ########## CLOUD FUNCTIONS VARIABLES ##############
+    # turn these on when the code is run as a cloud function
+    os.environ['DUNE_API_KEY'] = os.environ.get('dune_api_key')
+    coingecko_api_key = os.environ.get('coingecko_api_key')
+    request_json = request.get_json(silent=True)
+    verbose=False
  
 
-    ########## NOTEBOOK DEV VARIABLES ##############
-    # turn these on when the code is run in a notebook
+    # ########## NOTEBOOK DEV VARIABLES ##############
+    # # turn these on when the code is run in a notebook
 
-    load_dotenv()  # Load environment variables from .env file at the start of your application
-    os.environ['DUNE_API_KEY'] = get_secret('apikey_dune_whale_watch')
-    coingecko_api_key = get_secret('apikey_coingecko_tentabs_free')
-    request_json = {
-        # 'blockchain': 'solana'
-        'blockchain': 'ethereum'
-        # 'blockchain': 'avalanche'
+    # load_dotenv()  # Load environment variables from .env file at the start of your application
+    # os.environ['DUNE_API_KEY'] = get_secret('apikey_dune_whale_watch')
+    # coingecko_api_key = get_secret('apikey_coingecko_tentabs_free')
+    # request_json = {
+    #     # 'blockchain': 'solana'
+    #     'blockchain': 'ethereum'
+    #     # 'blockchain': 'avalanche'
 
-        # ,'address': '947tEoG318GUmyjVYhraNRvWpMX7fpBTDQFBoJpipvSkSG3' # solchat sol
-        # ,'address': 'AVLhahDcDQ4m4vHM4ug63oh7xc8Jtk49Dm5hoe9Sazqr' # solama sol
-        # # ,'address': 'EJPtJEDogxzDbvM8qvAsqYbLmPj5n1vQeqoAzj9Yfv3q' # bozo sol
-        # ,'address': 'B5LMXiuvbB5jN3auECUtdfyeFWm27krgFinrBrqJGFRM' #cern sol
-        ,'address': '0x6982508145454ce325ddbe47a25d4ec3d2311933' # pepe eth
-        # ,'address': '0x88f89be3e9b1dc1c5f208696fb9cabfcc684bd5f' # something avax
+    #     # ,'address': '947tEoG318GUmyjVYhraNRvWpMX7fpBTDQFBoJpipvSkSG3' # solchat sol
+    #     # ,'address': 'AVLhahDcDQ4m4vHM4ug63oh7xc8Jtk49Dm5hoe9Sazqr' # solama sol
+    #     # # ,'address': 'EJPtJEDogxzDbvM8qvAsqYbLmPj5n1vQeqoAzj9Yfv3q' # bozo sol
+    #     # ,'address': 'B5LMXiuvbB5jN3auECUtdfyeFWm27krgFinrBrqJGFRM' #cern sol
+    #     ,'address': '0x6982508145454ce325ddbe47a25d4ec3d2311933' # pepe eth
+    #     # ,'address': '0x88f89be3e9b1dc1c5f208696fb9cabfcc684bd5f' # something avax
 
-        # ,'address': 'yyx8fCqokZoTN6mhw9MvFT5m57bwvSZUxbCA1THdHnB' # open input
+    #     # ,'address': 'yyx8fCqokZoTN6mhw9MvFT5m57bwvSZUxbCA1THdHnB' # open input
         
-        ,'whale_threshold_usd': 30000
-        # ,'whale_threshold_tokens': 1000000
-        # ,'days_of_history': 90
-    }
-    request_json['submitted_by'] = 'dev'
-    verbose=True
+    #     ,'whale_threshold_usd': 30000
+    #     # ,'whale_threshold_tokens': 1000000
+    #     # ,'days_of_history': 90
+    # }
+    # request_json['submitted_by'] = 'dev'
+    # verbose=True
 
 
     ### USER VARIABLE PARSING
@@ -1214,4 +1214,4 @@ def request_whales_chart(request):
     )
     print(f'whale watch finished after {str(round(processing_time))}s ({round(dune_total_time)}s querying): <{str(api_response_code)}: {function_result_summary}: {function_result_detail}>')
 
-return ([function_result_summary,function_result_detail,discord_message],api_response_code)
+    return ([function_result_summary,function_result_detail,discord_message],api_response_code)
