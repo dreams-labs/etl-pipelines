@@ -955,6 +955,15 @@ def whales_chart_wrapper(
             contract_address,
             decimals=token_dict['decimals']
         )
+    # API CODE 400: insufficient dune history
+    if transfers_df.shape[0]==0:
+        api_response_code = 400
+        function_result_summary = 'insufficient dune data'
+        function_result_detail = f'dune database shows no transactions'
+        discord_message = 'Dune database does not have a transaction history for this token. Tokens must have 2+ days of history for a chart to generate.'
+        if verbose:
+            print(function_result_detail)
+        return(api_response_code,function_result_summary,function_result_detail,discord_message,dune_execution_time,dune_total_time)
 
     # upload token transfer data to bigquery if it doesn't already exist
     upload_transfers_to_bigquery(
@@ -976,6 +985,7 @@ def whales_chart_wrapper(
         discord_message = 'Dune shows less than 2 days of history for this token. Tokens must have 2+ days of history for a chart to generate.'
         if verbose:
             print(function_result_detail)
+        return(api_response_code,function_result_summary,function_result_detail,discord_message,dune_execution_time,dune_total_time)
 
 
     ### DRAWING THE WHALES CHART ###
