@@ -286,7 +286,7 @@ def get_fresh_dune_data(full_query):
     return transfers_df
 
 
-def freshen_coin_wallet_net_transfers(freshness_df,transfers_df):
+def append_to_bigquery_table(freshness_df,transfers_df):
     '''
     uploads the new transfers data to bigquery to ensure the table is fully refreshed through
     the last full UTC day. 
@@ -390,7 +390,7 @@ def freshen_coin_wallet_net_transfers(freshness_df,transfers_df):
 #         is_private=False
 #     )
 
-def wrapper_function():
+def freshen_coin_wallet_net_transfers():
     '''
     runs all functions in sequence to complete all update steps
     '''
@@ -405,4 +405,4 @@ def wrapper_function():
     transfers_df = get_fresh_dune_data(full_query)
 
     # upload the fresh dune data to bigquery
-    freshen_coin_wallet_net_transfers(freshness_df,transfers_df)
+    append_to_bigquery_table(freshness_df,transfers_df)
