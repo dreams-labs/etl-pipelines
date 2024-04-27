@@ -389,3 +389,20 @@ def freshen_coin_wallet_net_transfers(freshness_df,transfers_df):
 #         ],
 #         is_private=False
 #     )
+
+def wrapper_function():
+    '''
+    runs all functions in sequence to complete all update steps
+    '''
+    # update the dune table that tracks how fresh the data is
+    freshness_df = update_dune_freshness_table()
+
+    # generate the sql query needed to refresh the transfers table
+    update_chains = freshness_df['chain'].unique()
+    full_query = generate_net_transfers_update_query(update_chains)
+
+    # retrieve the fresh dune data using the generated query
+    transfers_df = get_fresh_dune_data(full_query)
+
+    # upload the fresh dune data to bigquery
+    freshen_coin_wallet_net_transfers(freshness_df,transfers_df)
