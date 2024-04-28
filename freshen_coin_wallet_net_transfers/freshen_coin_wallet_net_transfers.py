@@ -398,7 +398,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
 #         is_private=False
 #     )
 
-@functions_framework.http
+@functions_framework.cloud_event
 def freshen_coin_wallet_net_transfers():
     '''
     runs all functions in sequence to complete all update steps
