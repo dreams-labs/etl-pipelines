@@ -11,6 +11,7 @@ import pandas as pd
 from dune_client.client import DuneClient
 from dune_client.query import QueryBase
 import pandas_gbq
+import functions_framework
 from dreams_core.googlecloud import GoogleCloud as dgc
 
 logging.basicConfig(
@@ -397,6 +398,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
 #         is_private=False
 #     )
 
+@functions_framework.http
 def freshen_coin_wallet_net_transfers():
     '''
     runs all functions in sequence to complete all update steps

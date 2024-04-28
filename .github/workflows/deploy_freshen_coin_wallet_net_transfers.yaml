@@ -1,29 +1,33 @@
 name: Deploy to Google Cloud
+# from https://github.com/google-github-actions/deploy-cloud-functions
 
 on:
   push:
     branches:
       - main
-    paths:
-      - 
-
-env:
-  PROJECT: 
 
 jobs:
-  deploy:
+  job_id:
     runs-on: ubuntu-latest
+    permissions:
+      contents: 'write'
+      id-token: 'write'
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
+    - uses: 'actions/checkout@v4'
 
-    - name: Set up Google Cloud SDK
-      uses: google-github-actions/setup-gcloud@master
+    - id: 'auth'
+      uses: 'google-github-actions/auth@v2'
       with:
-        project_id: ${{ secrets.GCP_PROJECT_ID }}
-        service_account_key: ${{ secrets.GCP_SA_KEY }}
-        export_default_credentials: true
+        service_account: 'github-actions-deployer@western-verve-411004.iam.gserviceaccount.com'
+
+
+    - id: 'deploy'
+      uses: 'google-github-actions/deploy-cloud-functions@v2'
+      with:
+        name: 'freshen_coin_wallet_net_transfers'
+        runtime: 'python311'
+        region: 'us-west1'
 
     - name: Deploy to Google Cloud
       run: |
