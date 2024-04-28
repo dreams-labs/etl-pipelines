@@ -20,7 +20,6 @@ logging.basicConfig(
     )
 logger = logging.getLogger(__name__)
 
-
 def update_dune_freshness_table():
     '''
     updates the dune table etl_net_transfers_freshness with the current state of the bigquery table 
@@ -81,6 +80,7 @@ def generate_net_transfers_update_query(dune_chains):
     returns:
         full_query <str>: the long dune query that will return all wallet-coin-days needed to update 
     '''
+
     sol_query = '''
     with solana as (
         --  retrieving the most recent bigquery records available in dune
@@ -285,7 +285,7 @@ def get_fresh_dune_data(full_query):
     # run dune query and load to a dataframe
     logger.info('fetching fresh dune data...')
     transfers_df = dune.run_query_dataframe(transfers_query, ping_frequency=10)
-    logger.info('fetched fresh dune data with %s rows.' % len(transfers_df))
+    logger.info('fetched fresh dune data with %s rows.', len(transfers_df))
 
     return transfers_df
 
@@ -344,7 +344,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
         'data_updated_at': 'datetime64[ns, UTC]'
     }
     upload_df = upload_df.astype(dtype_mapping)
-    logger.info('prepared upload df with %s rows.' % len(upload_df))
+    logger.info('prepared upload df with %s rows.',len(upload_df))
 
     # upload df to bigquery
     project_id = 'western-verve-411004'
@@ -367,7 +367,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
         ,table_schema=schema
         ,progress_bar=False
     )
-    logger.info('appended upload df to %s.' % table_name)
+    logger.info('appended upload df to %s.', table_name)
 
 
 # def create_dune_freshness_table():
