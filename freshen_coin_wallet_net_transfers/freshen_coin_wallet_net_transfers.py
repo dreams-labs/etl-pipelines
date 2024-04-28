@@ -253,6 +253,7 @@ def generate_net_transfers_update_query(dune_chains):
         query_selects = '\nunion all\n'.join([query_selects,f'select * from {chain_text_dune}'])
 
     full_query = query_ctes+query_selects
+    logger.info('generated full query.')
 
     return full_query
 
@@ -262,7 +263,8 @@ def get_fresh_dune_data(full_query):
     '''
     runs the query in dune and retreives the results as a df. note that decimal adjustments have \
     not yet been applied so the dune query values are not the same order of magnitude as the \
-    bigquery values. 
+    bigquery values. the query may take >10 minutes to run as it retrieves transfers from \
+    multiple chains
 
     params:
         full_query (str): sql query to run
@@ -281,7 +283,9 @@ def get_fresh_dune_data(full_query):
         query_id=query_id,
     )
     # run dune query and load to a dataframe
+    logger.info('fetching fresh dune data...')
     transfers_df = dune.run_query_dataframe(transfers_query, ping_frequency=10)
+    logger.info('fetched fresh dune data with %s rows.' % len(transfers_df))
 
     return transfers_df
 
@@ -340,6 +344,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
         'data_updated_at': 'datetime64[ns, UTC]'
     }
     upload_df = upload_df.astype(dtype_mapping)
+    logger.info('prepared upload df with %s rows.' % len(upload_df))
 
     # upload df to bigquery
     project_id = 'western-verve-411004'
@@ -360,7 +365,9 @@ def append_to_bigquery_table(freshness_df,transfers_df):
         ,project_id=project_id
         ,if_exists='append'
         ,table_schema=schema
-        ,progress_bar=False)
+        ,progress_bar=False
+    )
+    logger.info('appended upload df to %s.' % table_name)
 
 
 # def create_dune_freshness_table():
@@ -394,6 +401,8 @@ def freshen_coin_wallet_net_transfers():
     '''
     runs all functions in sequence to complete all update steps
     '''
+    logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
+
     # update the dune table that tracks how fresh the data is
     freshness_df = update_dune_freshness_table()
 
