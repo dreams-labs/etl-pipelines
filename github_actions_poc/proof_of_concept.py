@@ -12,7 +12,6 @@ def hello_http(request):
         <https://flask.palletsprojects.com/en/1.1.x/api/#flask.make_response>.
     """
     print('looking for a safe 100x, pls send recs')
-    print('I am version 2.0, update successful') 
     
     request_json = request.get_json(silent=True)
     request_args = request.args
