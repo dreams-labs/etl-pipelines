@@ -399,9 +399,14 @@ def append_to_bigquery_table(freshness_df,transfers_df):
 #     )
 
 @functions_framework.cloud_event
-def freshen_coin_wallet_net_transfers():
+def freshen_coin_wallet_net_transfers(data,context):
     '''
-    runs all functions in sequence to complete all update steps
+    runs all functions in sequence to complete all update steps. the parameters are dummy inputs
+    added so that the pub/sub message inputs fit within the function. the parameters are not used.
+
+    params:
+        data (dict): cloud event data
+        context: cloud event context
     '''
     logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
 
