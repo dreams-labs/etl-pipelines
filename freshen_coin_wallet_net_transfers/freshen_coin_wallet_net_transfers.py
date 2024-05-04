@@ -285,7 +285,7 @@ def get_fresh_dune_data(full_query):
     )
     # run dune query and load to a dataframe
     logger.info('fetching fresh dune data...')
-    transfers_df = dune.run_query_dataframe(transfers_query, ping_frequency=10)
+    transfers_df = dune.run_query_dataframe(transfers_query, ping_frequency=10, performance='large')
     logger.info('fetched fresh dune data with %s rows.', len(transfers_df))
 
     return transfers_df
@@ -310,6 +310,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
     '''
 
     # map decimals data from bigquery onto the retrieved dune data
+    logger.info('initiating bigquery upload...')
     freshness_df.rename(columns={'token_address':'contract_address'},inplace=True)
     transfers_df = pd.merge(
         transfers_df,
@@ -399,14 +400,13 @@ def append_to_bigquery_table(freshness_df,transfers_df):
 #     )
 
 @functions_framework.cloud_event
-def freshen_coin_wallet_net_transfers(data,context):
+def freshen_coin_wallet_net_transfers(data):
     '''
     runs all functions in sequence to complete all update steps. the parameters are dummy inputs
     added so that the pub/sub message inputs fit within the function. the parameters are not used.
 
     params:
-        data (dict): cloud event data
-        context: cloud event context
+        data (dict): dummy cloud event data
     '''
     logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
 
@@ -422,3 +422,5 @@ def freshen_coin_wallet_net_transfers(data,context):
 
     # upload the fresh dune data to bigquery
     append_to_bigquery_table(freshness_df,transfers_df)
+
+    logger.info('completed freshining etl_pipelines.coin_wallet_net_transfers.')
