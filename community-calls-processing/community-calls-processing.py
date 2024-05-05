@@ -842,95 +842,96 @@ def retrieve_call_metadata(
 
 # Triggered from a message on a Cloud Pub/Sub topic.
 @functions_framework.cloud_event
-def hello_pubsub(cloud_event):
+def process_community_calls(cloud_event):
+    verbose=True
 
-      # load secrets
-      coingecko_api_key = get_secret('apikey_coingecko_tentabs_free')
-      service_account = json.loads(get_secret('service_account_eng_general'))
+    # load secrets
+    coingecko_api_key = get_secret('apikey_coingecko_tentabs_free')
+    service_account = json.loads(get_secret('service_account_eng_general'))
 
-      # pull in the calls
-      query_sql = '''
-          select cn.*
-          from etl_pipelines.dreambot_new_calls cn
-          left join etl_pipelines.community_calls_intake_processed cp on cp.call_id = cn.call_id
-          where cp.call_id is null
-          and cn.call_date > '2024-04-03' # calls before this date were all manually processed
-          '''
-      calls_df = bigquery_run_sql(query_sql)
-      if verbose:
-          print(f'retrieved {str(calls_df.shape[0])} new calls')
+    # pull in the calls
+    query_sql = '''
+        select cn.*
+        from etl_pipelines.dreambot_new_calls cn
+        left join etl_pipelines.community_calls_intake_processed cp on cp.call_id = cn.call_id
+        where cp.call_id is null
+        and cn.call_date > '2024-04-03' # calls before this date were all manually processed
+        '''
+    calls_df = bigquery_run_sql(query_sql)
+    if verbose:
+        print(f'retrieved {str(calls_df.shape[0])} new calls')
 
-      # retreieve metadata for calls
-      calls_df_processed = retrieve_call_metadata(calls_df,verbose=True)
-
-
-      # set df datatypes so it uploads to bigquery
-      # this could likely be moved upstream to when the df is created
-      dtype_mapping = {
-          'call_id': str
-          ,'match_attempted_at': 'datetime64[ns, UTC]'
-          ,'processing_successful': bool
-          ,'initial_mc_valid': bool
-          ,'match_api_response': int
-          ,'metadata_source': str
-          ,'metadata_source_id': str
-          ,'reference': str
-          ,'category': str
-          ,'call_date': 'datetime64[ns, UTC]'
-          ,'caller': str
-          ,'discord_url': str
-          ,'market_cap_url': str
-          ,'chain': str
-          ,'token_contract': str
-          ,'initial_mc': str             
-      }
-      upload_df = calls_df_processed.astype(dtype_mapping)
+    # retreieve metadata for calls
+    calls_df_processed = retrieve_call_metadata(calls_df,verbose=True)
 
 
-      # define table schema datatypes and upload df to it
-      project_id = 'western-verve-411004'
-      table_name = 'etl_pipelines.community_calls_intake_processed'
-      schema = [
-          {'name':'call_id', 'type': 'string'}
-          ,{'name':'match_attempted_at', 'type': 'datetime'}
-          ,{'name':'processing_successful', 'type': 'bool'}
-          ,{'name':'initial_mc_valid', 'type': 'bool'}
-          ,{'name':'match_api_response', 'type': 'int64'}
-          ,{'name':'metadata_source', 'type': 'string'}
-          ,{'name':'metadata_source_id', 'type': 'string'}
-          ,{'name':'reference', 'type': 'string'}
-          ,{'name':'category', 'type': 'string'}
-          ,{'name':'call_date', 'type': 'datetime'}
-          ,{'name':'caller', 'type': 'string'}
-          ,{'name':'discord_url', 'type': 'string'}
-          ,{'name':'market_cap_url', 'type': 'string'}
-          ,{'name':'chain', 'type': 'string'}
-          ,{'name':'token_contract', 'type': 'string'}
-          ,{'name':'initial_mc', 'type': 'string'}
-      ]
-      pandas_gbq.to_gbq(
-          upload_df
-          ,table_name
-          ,project_id=project_id
-          ,if_exists='append'
-          ,table_schema=schema
-          ,progress_bar=False)
+    # set df datatypes so it uploads to bigquery
+    # this could likely be moved upstream to when the df is created
+    dtype_mapping = {
+        'call_id': str
+        ,'match_attempted_at': 'datetime64[ns, UTC]'
+        ,'processing_successful': bool
+        ,'initial_mc_valid': bool
+        ,'match_api_response': int
+        ,'metadata_source': str
+        ,'metadata_source_id': str
+        ,'reference': str
+        ,'category': str
+        ,'call_date': 'datetime64[ns, UTC]'
+        ,'caller': str
+        ,'discord_url': str
+        ,'market_cap_url': str
+        ,'chain': str
+        ,'token_contract': str
+        ,'initial_mc': str             
+    }
+    upload_df = calls_df_processed.astype(dtype_mapping)
 
 
-      # export processed calls to google sheets, splitting by automated vs manual
-      # automated calls
-      calls_df_automated = calls_df_processed[calls_df_processed['processing_successful']==True]
-      sheets_append_df(
-          calls_df_automated
-          ,spreadsheet_id='1X6AJWBJHisADvyqoXwEvTPi1JSNReVU_woNW32Hz_yQ'
-          ,worksheet='gcf_calls_automated'
-          ,verbose=True
-      )
-      # manual calls
-      calls_df_manual = calls_df_processed[calls_df_processed['processing_successful']==False]
-      sheets_append_df(
-          calls_df_manual
-          ,spreadsheet_id='1X6AJWBJHisADvyqoXwEvTPi1JSNReVU_woNW32Hz_yQ'
-          ,worksheet='gcf_calls_manual'
-          ,verbose=True
-      )
+    # define table schema datatypes and upload df to it
+    project_id = 'western-verve-411004'
+    table_name = 'etl_pipelines.community_calls_intake_processed'
+    schema = [
+        {'name':'call_id', 'type': 'string'}
+        ,{'name':'match_attempted_at', 'type': 'datetime'}
+        ,{'name':'processing_successful', 'type': 'bool'}
+        ,{'name':'initial_mc_valid', 'type': 'bool'}
+        ,{'name':'match_api_response', 'type': 'int64'}
+        ,{'name':'metadata_source', 'type': 'string'}
+        ,{'name':'metadata_source_id', 'type': 'string'}
+        ,{'name':'reference', 'type': 'string'}
+        ,{'name':'category', 'type': 'string'}
+        ,{'name':'call_date', 'type': 'datetime'}
+        ,{'name':'caller', 'type': 'string'}
+        ,{'name':'discord_url', 'type': 'string'}
+        ,{'name':'market_cap_url', 'type': 'string'}
+        ,{'name':'chain', 'type': 'string'}
+        ,{'name':'token_contract', 'type': 'string'}
+        ,{'name':'initial_mc', 'type': 'string'}
+    ]
+    pandas_gbq.to_gbq(
+        upload_df
+        ,table_name
+        ,project_id=project_id
+        ,if_exists='append'
+        ,table_schema=schema
+        ,progress_bar=False)
+
+
+    # export processed calls to google sheets, splitting by automated vs manual
+    # automated calls
+    calls_df_automated = calls_df_processed[calls_df_processed['processing_successful']==True]
+    sheets_append_df(
+        calls_df_automated
+        ,spreadsheet_id='1X6AJWBJHisADvyqoXwEvTPi1JSNReVU_woNW32Hz_yQ'
+        ,worksheet='gcf_calls_automated'
+        ,verbose=True
+    )
+    # manual calls
+    calls_df_manual = calls_df_processed[calls_df_processed['processing_successful']==False]
+    sheets_append_df(
+        calls_df_manual
+        ,spreadsheet_id='1X6AJWBJHisADvyqoXwEvTPi1JSNReVU_woNW32Hz_yQ'
+        ,worksheet='gcf_calls_manual'
+        ,verbose=True
+    )
