@@ -47,6 +47,7 @@ from dune_client.query import QueryBase
 import functions_framework
 import pandas_gbq
 from dreams_core import core as dc
+from dreams_core.googlecloud import GoogleCloud as dgc
 
 
 # SHARED UTILITY FUNCTIONS
@@ -946,40 +947,63 @@ def whales_chart_wrapper(
     shrimp_threshold_tokens = shrimp_threshold_usd/whale_threshold_usd
 
 
-
-    ### GETTING DUNE QUERY DATA ###
-    # retrieve token transfer data from dune
-    dune_start_time = time.time()
+    ### GET COIN TRANSFER HISTORY ###
+    # get list of tokens that have transfers data in bigquery
     if verbose:
-        print(f'beginning dune query...')
-    transfers_df = dune_get_token_transfers(
-            chain_text_dune,
-            contract_address,
-            decimals=token_dict['decimals']
-        )
-    dune_total_time = time.time() - dune_start_time
-    if verbose:
-        print(f'dune query finished after {str(dune_total_time)} seconds')
+        print(f'checking if token exists in bigquery...')
+    query_sql = '''
+        select token_address
+        from `etl_pipelines.coin_wallet_net_transfers`
+        group by 1
+    '''
+    tokens_with_data_df = dgc().run_sql(query_sql)
+    tokens_with_data = tokens_with_data_df['token_address'].values
 
-    # API CODE 400: insufficient dune history
-    if transfers_df.shape[0]==0:
-        api_response_code = 400
-        function_result_summary = 'insufficient dune data'
-        function_result_detail = f'dune database shows no transactions'
-        discord_message = 'Dune database does not have a transaction history for this token. Tokens must have 2+ days of history for a chart to generate.'
+    # if it already exists in bigquery, get it from there
+    if contract_address in tokens_with_data:
         if verbose:
-            print(function_result_detail)
-        return(api_response_code,function_result_summary,function_result_detail,discord_message,dune_execution_time,dune_total_time)
+            print(f'token found. retrieving transfers from bigquery...')
+        query_sql = f'''
+            select date
+            ,wallet_address
+            ,daily_net_transfers
+            from `etl_pipelines.coin_wallet_net_transfers`
+            where token_address = '{contract_address}'
+        '''
+        transfers_df = dgc().run_sql(query_sql)
+    else:
+        # retrieve token transfer data from dune
+        dune_start_time = time.time()
+        if verbose:
+            print(f'beginning dune query...')
+        transfers_df = dune_get_token_transfers(
+                chain_text_dune,
+                contract_address,
+                decimals=token_dict['decimals']
+            )
+        dune_total_time = time.time() - dune_start_time
+        if verbose:
+            print(f'dune query finished after {str(dune_total_time)} seconds')
 
-    # upload token transfer data to bigquery if it doesn't already exist
-    if verbose:
-        print('uploading data to bigquery if necessary...')
-    upload_transfers_to_bigquery(
-            transfers_df,
-            chain_text_dune,
-            contract_address,
-            decimals=token_dict['decimals']
-        )
+        # API CODE 400: insufficient dune history
+        if transfers_df.shape[0]==0:
+            api_response_code = 400
+            function_result_summary = 'insufficient dune data'
+            function_result_detail = f'dune database shows no transactions'
+            discord_message = 'Dune database does not have a transaction history for this token. Tokens must have 2+ days of history for a chart to generate.'
+            if verbose:
+                print(function_result_detail)
+            return(api_response_code,function_result_summary,function_result_detail,discord_message,dune_execution_time,dune_total_time)
+
+        # upload token transfer data to bigquery if it doesn't already exist
+        if verbose:
+            print('uploading data to bigquery if necessary...')
+        upload_transfers_to_bigquery(
+                transfers_df,
+                chain_text_dune,
+                contract_address,
+                decimals=token_dict['decimals']
+            )
 
     # convert transfer data into daily counts of wallets by size
     if verbose:
