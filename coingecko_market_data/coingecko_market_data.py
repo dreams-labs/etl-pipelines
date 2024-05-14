@@ -51,24 +51,24 @@ def format_and_add_columns(df, id, contract):
         df.at[index, 'market_caps'] = row['market_caps'][1]
         df.at[index, 'total_volumes'] = row['total_volumes'][1]
 
-    df = df.assign(date=[i[0] for i in df["prices"]],
-                   prices=[i[1] for i in df["prices"]],
+    df = df.assign(date=[i[0] for i in df['prices']],
+                   prices=[i[1] for i in df['prices']],
                    chain=id,
                    address=contract)
 
     # Rearranging columns
-    df = df[['chain', 'address', "date",'prices', "market_caps", "total_volumes"]]
+    df = df[['chain', 'address', 'date','prices', 'market_caps', 'total_volumes']]
 
     # Renaming columns
-    df.columns = ['chain', 'address', "date", 'price', "market_cap", "volume"]
+    df.columns = ['chain', 'address', 'date', 'price', 'market_cap', 'volume']
 
     return df
 
 
 def retrieve_coin_data(id, contract):
-    BASE_URL = "https://api.coingecko.com/api/v3/coins"
+    BASE_URL = 'https://api.coingecko.com/api/v3/coins'
 
-    r = requests.get(f"{BASE_URL}/{id}/contract/{contract}/market_chart/?vs_currency=usd&days=365")
+    r = requests.get(f'{BASE_URL}/{id}/contract/{contract}/market_chart/?vs_currency=usd&days=365')
 
     data = r.json()
     df = pd.DataFrame(data)
