@@ -36,7 +36,15 @@ def replace_unix_timestamp(lst):
 
 def format_and_add_columns(df, coingecko_id):
     '''
-    converts json data from the coingecko api into a table-formatted dataframe
+    converts json data from the coingecko api into a table-formatted dataframe by converting columns of \
+    tuples into standardized columns that match the bigquery table format
+
+    params:
+        df (pandas.DataFrame): df of coingecko market data
+        coingecko_id (str): coingecko id of coin
+
+    returns:
+        df (pandas.DataFrame): formatted df of market data
     '''
     # L`oop through each row in the DataFrame and apply the function
     for index, row in df.iterrows():
@@ -56,31 +64,33 @@ def format_and_add_columns(df, coingecko_id):
 
     # Renaming columns
     df.columns = ['coingecko_id', 'date', 'price', 'market_cap', 'volume']
-`
+
     return df
 
 
-def retrieve_coin_data(chain_text_coingecko, contract):
+def retrieve_coin_data(coingecko_id):
     '''
-    retrieves market data for a given coin and contract
+    retrieves market data for a given coingecko_id. 
+
+    note that no api key is used, as inputting a free plan api key in the headers causes the
+    call to error out. 
 
     params:
-        chain_text_coingecko (str): blockchain alias from coingecko's naming scheme
-        contract (str): contract address of coin
+        coingecko_id (str): coingecko id of coin
 
     returns:
-        df (dataframe): df of market data
+        df (dataframe): formatted df of market data
     '''
     logger = logging.getLogger(__name__)
 
-    logger.info('retreiving coingecko data for %s...', contract)
-    BASE_URL = 'https://api.coingecko.com/api/v3/coins'
-    r = requests.get(f'{BASE_URL}/{chain_text_coingecko}/contract/{contract}/market_chart/?vs_currency=usd&days=365')
+    logger.info('retreiving coingecko data for %s...', coingecko_id)
+    url = f'https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=365&interval=daily'
+    r = requests.get(url, timeout=30)
 
-    logger.info('formatting coingecko data for %s...', contract)
+    logger.info('formatting coingecko data for %s...', coingecko_id)
     data = r.json()
     df = pd.DataFrame(data)
-    df = format_and_add_columns(df, chain_text_coingecko, contract)
+    df = format_and_add_columns(df, coingecko_id)
 
     return df
 
