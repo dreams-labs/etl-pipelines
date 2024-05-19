@@ -1,5 +1,6 @@
 import datetime
 import logging
+from pytz import utc
 import pandas as pd
 import json
 import requests
@@ -49,7 +50,7 @@ def format_and_add_columns(df, coingecko_id):
     # L`oop through each row in the DataFrame and apply the function
     for index, row in df.iterrows():
         # Formatting unix timestamp of prices column
-        df.at[index, 'prices'] = cmd.replace_unix_timestamp(row['prices'])
+        df.at[index, 'prices'] = replace_unix_timestamp(row['prices'])
 
         # Removing the unix timestamps from the columns
         df.at[index, 'market_caps'] = row['market_caps'][1]
@@ -59,11 +60,20 @@ def format_and_add_columns(df, coingecko_id):
                     prices=[i[1] for i in df['prices']],
                     coingecko_id = coingecko_id)
 
-    # Rearranging columns
+    # rearranging and renaming columns
     df = df[['coingecko_id', 'date', 'prices', 'market_caps', 'total_volumes']]
-
-    # Renaming columns
     df.columns = ['coingecko_id', 'date', 'price', 'market_cap', 'volume']
+
+    # convert date column to datetime
+    df['date'] = pd.to_datetime(df['date'])
+    df['date'] = df['date'].dt.tz_localize('UTC')
+
+    # find and drop the index of the row with the mostrecent date as a the day isn't over
+    max_date_index = df['date'].idxmax()
+    df = df.drop(max_date_index)
+
+    # round date to nearest day
+    df['date'] = pd.to_datetime(df['date']).dt.floor('D')
 
     return df
 
@@ -115,24 +125,22 @@ def upload_market_data(market_df):
     # add metadata to upload_df
     upload_df = pd.DataFrame()
     upload_df['date'] = market_df['date']
-    upload_df['chain_text_coingecko'] = market_df['chain']
-    upload_df['token_address'] = market_df['address']
+    upload_df['coin_id'] = market_df['coin_id']
+    upload_df['coingecko_id'] = market_df['coingecko_id']
     upload_df['price'] = market_df['price']
     upload_df['market_cap'] = market_df['market_cap']
     upload_df['volume'] = market_df['volume']
-    upload_df['data_source'] = 'coingecko'
-    upload_df['data_updated_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    upload_df['updated_at'] = datetime.datetime.now(utc).strftime('%Y-%m-%d %H:%M:%S')
 
     # set df datatypes of upload df
     dtype_mapping = {
         'date': 'datetime64[ns, UTC]',
-        'chain_text_coingecko': str,
-        'token_address': str,
+        'coin_id': str,
+        'coingecko_id': str,
         'price': float,
         'market_cap': float,
-        'volume': float,
-        'data_source': str,
-        'data_updated_at': 'datetime64[ns, UTC]'
+        'volume': int,
+        'updated_at': 'datetime64[ns, UTC]'
     }
     upload_df = upload_df.astype(dtype_mapping)
     logger.info('prepared upload df with %s rows.',len(upload_df))
@@ -142,16 +150,15 @@ def upload_market_data(market_df):
     table_name = 'etl_pipelines.coin_market_data_coingecko'
     schema = [
         {'name':'date', 'type': 'datetime'},
+        {'name':'coin_id', 'type': 'string'},
         {'name':'chain_text_coingecko', 'type': 'string'},
-        {'name':'token_address', 'type': 'string'},
 
         # note the special datatype for bignumeric which ensures precision for very small price values
         {'name':'price', 'type': 'bignumeric'},
 
         {'name':'market_cap', 'type': 'float'},
         {'name':'volume', 'type': 'float'},
-        {'name':'data_source', 'type': 'string'},
-        {'name':'data_updated_at', 'type': 'datetime'}
+        {'name':'updated_at', 'type': 'datetime'}
     ]
     pandas_gbq.to_gbq(
         upload_df
