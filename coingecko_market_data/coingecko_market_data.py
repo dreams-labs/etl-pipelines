@@ -47,12 +47,12 @@ def format_and_add_columns(df, coingecko_id):
     returns:
         df (pandas.DataFrame): formatted df of market data
     '''
-    # L`oop through each row in the DataFrame and apply the function
+    # loop through each row in the DataFrame and apply the function
     for index, row in df.iterrows():
-        # Formatting unix timestamp of prices column
+        # formatting unix timestamp of prices column
         df.at[index, 'prices'] = replace_unix_timestamp(row['prices'])
 
-        # Removing the unix timestamps from the columns
+        # removing the unix timestamps from the columns
         df.at[index, 'market_caps'] = row['market_caps'][1]
         df.at[index, 'total_volumes'] = row['total_volumes'][1]
 
@@ -64,11 +64,15 @@ def format_and_add_columns(df, coingecko_id):
     df = df[['coingecko_id', 'date', 'prices', 'market_caps', 'total_volumes']]
     df.columns = ['coingecko_id', 'date', 'price', 'market_cap', 'volume']
 
-    # convert date column to datetime
+    # convert market_cap and volumes to integers
+    df['market_cap'] = df['market_cap'].astype(int)
+    df['volume'] = df['volume'].astype(int)
+
+    # convert date column to utc datetime
     df['date'] = pd.to_datetime(df['date'])
     df['date'] = df['date'].dt.tz_localize('UTC')
 
-    # find and drop the index of the row with the mostrecent date as a the day isn't over
+    # find and drop the index of the row with the most recent date to avoid partial date data
     max_date_index = df['date'].idxmax()
     df = df.drop(max_date_index)
 
@@ -138,7 +142,7 @@ def upload_market_data(market_df):
         'coin_id': str,
         'coingecko_id': str,
         'price': float,
-        'market_cap': float,
+        'market_cap': int,
         'volume': int,
         'updated_at': 'datetime64[ns, UTC]'
     }
@@ -156,8 +160,8 @@ def upload_market_data(market_df):
         # note the special datatype for bignumeric which ensures precision for very small price values
         {'name':'price', 'type': 'bignumeric'},
 
-        {'name':'market_cap', 'type': 'float'},
-        {'name':'volume', 'type': 'float'},
+        {'name':'market_cap', 'type': 'int'},
+        {'name':'volume', 'type': 'int'},
         {'name':'updated_at', 'type': 'datetime'}
     ]
     pandas_gbq.to_gbq(
