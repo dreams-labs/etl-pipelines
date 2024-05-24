@@ -1,19 +1,58 @@
+'''
+cloud function that updates the bigquery table `etl_pipelines.coin_market_data_coingecko` by making api \
+calls to coingecko to get market data and uploading it
+'''
 import datetime
+import time
 import logging
 from pytz import utc
 import pandas as pd
-import json
 import requests
 import pandas_gbq
 import functions_framework
 from dreams_core.googlecloud import GoogleCloud as dgc
 
 
-# The miliseconds are removed
+# retrieve list of coins with a coingecko_id that have no market data
+def retrieve_updates_df():
+    '''
+    pulls a list of tokens with coingecko ids from bigquery, limiting to coins that either \
+        have no market data or that have data at least 2 days old. 
+
+    returns:
+        updates_df (dataframe): list of tokens that need price updates from coingecko
+    '''
+
+    query_sql = '''
+        with coingecko_data_status as (
+        select cgi.coin_id
+        ,cgi.coingecko_id
+        ,max(md.date) as most_recent_record
+        from `etl_pipelines.coin_coingecko_ids` cgi
+        left join `etl_pipelines.coin_market_data_coingecko` md on md.coingecko_id = cgi.coingecko_id
+        where cgi.coingecko_id is not null
+        group by 1,2
+        )
+
+        select cds.coin_id
+        ,cds.coingecko_id
+        ,cds.most_recent_record
+        from coingecko_data_status cds
+        where (
+        cds.most_recent_record is null
+        or cds.most_recent_record < (current_date('UTC') - 1)
+        )
+        '''
+
+    updates_df = dgc().run_sql(query_sql)
+
+    return updates_df
+
+
 def strip_and_format_unixtime(unix_time):
     '''
-    converts a unix timestamp into a single date datetime. this includes logic that assigns \
-    mid-day records to a single date
+    converts a coingecko unix timestamp into a single date datetime. this includes logic that \
+        assigns mid-day records to a single date
 
     params:
         unix_time (int): unix timestamp
@@ -40,7 +79,6 @@ def strip_and_format_unixtime(unix_time):
     return formatted_datetime
 
 
-# Function to divide the first item in the list by 2
 def replace_unix_timestamp(lst):
     '''
     utility function to replace coingecko tuple responses with unix timestamps into datetimes
@@ -56,14 +94,14 @@ def replace_unix_timestamp(lst):
 
 def format_and_add_columns(df, coingecko_id, coin_id, most_recent_record):
     '''
-    converts json data from the coingecko api into a table-formatted dataframe by converting columns of \
-    tuples into standardized columns that match the bigquery table format
+    converts json data from the coingecko api into a table-formatted dataframe by converting \
+        columns of tuples into standardized columns that match the bigquery table format
 
     params:
         df (pandas.DataFrame): df of coingecko market data
         coingecko_id (str): coingecko id of coin
         coin_id (str): matches core.coins.coin_id
-        most_recent_record (datetime): most recent timestamp in etl_pipelines.coin_market_data_coingecko
+        most_recent_record (datetime): most recent record in coin_market_data_coingecko
 
     returns:
         df (pandas.DataFrame): formatted df of market data
@@ -98,13 +136,13 @@ def format_and_add_columns(df, coingecko_id, coin_id, most_recent_record):
     max_date_index = df['date'].idxmax()
     df = df.drop(max_date_index)
 
-    # if records exist in the database, remove them from the df
-    if not pd.isna(most_recent_record):
-
-
-
     # round date to nearest day
     df['date'] = pd.to_datetime(df['date']).dt.floor('D')
+
+    # if records already exist in the database, remove them from the df
+    if not pd.isna(most_recent_record):
+        most_recent_record = most_recent_record.to_pydatetime().replace(tzinfo=utc)
+        df = df[df['date'] > most_recent_record]
 
     # drop duplicate dates if exists. this only occurs if a coin is removed from coingecko, e.g.:
     # https://www.coingecko.com/en/coins/serum-ser
@@ -114,9 +152,9 @@ def format_and_add_columns(df, coingecko_id, coin_id, most_recent_record):
     return df
 
 
-def retrieve_coin_data(coingecko_id):
+def ping_coingecko_api(coingecko_id):
     '''
-    retrieves market data for a given coingecko_id. 
+    requests market data for a given coingecko_id. 
 
     note that no api key is used, as inputting a free plan api key in the headers causes the
     call to error out. 
@@ -137,6 +175,42 @@ def retrieve_coin_data(coingecko_id):
     else:
         df = None
     return df,r.status_code
+
+def retrieve_coingecko_market_data(coingecko_id):
+    '''
+    attempts to retrieve data from the coingecko api including error handling for various \
+        coingecko api status codes
+
+    params:
+        coingecko_id (string): coingecko id of coin
+
+    returns:
+        market_df (dataframe): raw api response of market data
+        api_status_code (int): status code of coingecko api call
+    '''
+    logger = logging.getLogger(__name__)
+    logger.addHandler(logging.NullHandler())
+    retry_attempts = 3
+
+    for attempt in range(retry_attempts):
+        market_df,api_status_code = ping_coingecko_api(coingecko_id)
+        if api_status_code == 200:
+            break
+        elif api_status_code == 404:
+            break
+        elif api_status_code == 429:
+            logger.info('coingecko api call timed out, retrying after a 60 second pause...')
+            time.sleep(60)
+            retry_attempts -= 1
+            continue
+        else:
+            logger.error('unexpected coingecko api status code %s for %s, continuing to next coin.',
+                str(api_status_code), coingecko_id)
+            break
+    logger.info('coingecko api call for %s completed with status code %s.',
+        coingecko_id, str(api_status_code))
+
+    return market_df, api_status_code
 
 
 def upload_market_data(market_df):
@@ -187,7 +261,7 @@ def upload_market_data(market_df):
         {'name':'coin_id', 'type': 'string'},
         {'name':'chain_text_coingecko', 'type': 'string'},
 
-        # note the special datatype for bignumeric which ensures precision for very small price values
+        # note the bignumeric datatype which ensures precision for very small price values
         {'name':'price', 'type': 'bignumeric'},
 
         {'name':'market_cap', 'type': 'int'},
@@ -202,7 +276,55 @@ def upload_market_data(market_df):
         ,table_schema=schema
         ,progress_bar=False
 
-        # this setting slows the upload but  is required for the bignumeric column to upload without errors
+        # this setting is required for the bignumeric column to upload without errors
         ,api_method='load_csv'
     )
     logger.info('appended upload df to %s.', table_name)
+
+
+@functions_framework.cloud_event
+def update_coingecko_market_data():
+    '''
+    runs all functions in sequence to update and upload coingecko market data
+    '''
+    # configure logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
+        datefmt='%d/%b/%Y %H:%M:%S'
+        )
+    logger = logging.getLogger(__name__)
+
+    # retrieve list of coins with a coingecko_id that need market data updates
+    updates_df = retrieve_updates_df()
+
+    # retrieve market data for each coin in need of updates
+    for i in range(updates_df.shape[0]):
+        try:
+            # store iteration-specific variables
+            coingecko_id = updates_df['coingecko_id'][i]
+            coin_id = updates_df['coin_id'][i]
+            most_recent_record = updates_df['most_recent_record'][i]
+
+            # retrieve coingecko market data
+            logger.info('retreiving coingecko data for %s...', coingecko_id)
+            market_df,api_status_code = retrieve_coingecko_market_data(coingecko_id)
+
+            if api_status_code == 200:
+                # format and filter market data to prepare for upload
+                logger.info('formatting market data for %s...', coingecko_id)
+                market_df = format_and_add_columns(market_df, coingecko_id, coin_id, most_recent_record)
+
+                # skip to next coin if there's no new records available
+                if market_df.empty:
+                    logger.info('no new records found for %s, continuing to next coin.', coingecko_id)
+                    continue
+
+                # upload market data to bigquery
+                logger.info('uploading market data for %s...', coingecko_id)
+                upload_market_data(market_df)
+                continue
+
+        except Exception as e:
+            logger.error('an error occurred for coingecko_id %s: %s. continuing to next coin.', coingecko_id, e)
+            continue
