@@ -11,6 +11,16 @@ from dreams_core.googlecloud import GoogleCloud as dgc
 
 # The miliseconds are removed
 def strip_and_format_unixtime(unix_time):
+    '''
+    converts a unix timestamp into a single date datetime. this includes logic that assigns \
+    mid-day records to a single date
+
+    params:
+        unix_time (int): unix timestamp
+
+    returns:
+        formatted_datetime (datetime): datetime derived from the unix timestamp
+    '''
     # Convert the number to a string
     number_str = str(unix_time)
 
@@ -32,10 +42,19 @@ def strip_and_format_unixtime(unix_time):
 
 # Function to divide the first item in the list by 2
 def replace_unix_timestamp(lst):
+    '''
+    utility function to replace coingecko tuple responses with unix timestamps into datetimes
+
+    params:
+        lst (tuple): tuple response from coingecko witha unix timestamp as the first value
+
+    returns:
+        lst (datetime): datetime derived from the unix timestamp
+    '''
     lst[0] = strip_and_format_unixtime(lst[0])
     return lst
 
-def format_and_add_columns(df, coingecko_id):
+def format_and_add_columns(df, coingecko_id, coin_id, most_recent_record):
     '''
     converts json data from the coingecko api into a table-formatted dataframe by converting columns of \
     tuples into standardized columns that match the bigquery table format
@@ -43,6 +62,8 @@ def format_and_add_columns(df, coingecko_id):
     params:
         df (pandas.DataFrame): df of coingecko market data
         coingecko_id (str): coingecko id of coin
+        coin_id (str): matches core.coins.coin_id
+        most_recent_record (datetime): most recent timestamp in etl_pipelines.coin_market_data_coingecko
 
     returns:
         df (pandas.DataFrame): formatted df of market data
@@ -61,8 +82,9 @@ def format_and_add_columns(df, coingecko_id):
                     coingecko_id = coingecko_id)
 
     # rearranging and renaming columns
-    df = df[['coingecko_id', 'date', 'prices', 'market_caps', 'total_volumes']]
-    df.columns = ['coingecko_id', 'date', 'price', 'market_cap', 'volume']
+    df['coin_id'] = coin_id
+    df = df[['coingecko_id', 'coin_id', 'date', 'prices', 'market_caps', 'total_volumes']]
+    df.columns = ['coingecko_id', 'coin_id', 'date', 'price', 'market_cap', 'volume']
 
     # convert market_cap and volumes to integers
     df['market_cap'] = df['market_cap'].astype(int)
@@ -76,8 +98,18 @@ def format_and_add_columns(df, coingecko_id):
     max_date_index = df['date'].idxmax()
     df = df.drop(max_date_index)
 
+    # if records exist in the database, remove them from the df
+    if not pd.isna(most_recent_record):
+
+
+
     # round date to nearest day
     df['date'] = pd.to_datetime(df['date']).dt.floor('D')
+
+    # drop duplicate dates if exists. this only occurs if a coin is removed from coingecko, e.g.:
+    # https://www.coingecko.com/en/coins/serum-ser
+    # https://www.coingecko.com/en/coins/chart-roulette
+    df = df.drop_duplicates(subset='date', keep='last')
 
     return df
 
@@ -94,19 +126,17 @@ def retrieve_coin_data(coingecko_id):
 
     returns:
         df (dataframe): formatted df of market data
+        status_code (int): status code of coingecko api call
     '''
-    logger = logging.getLogger(__name__)
-
-    logger.info('retreiving coingecko data for %s...', coingecko_id)
     url = f'https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=365&interval=daily'
     r = requests.get(url, timeout=30)
 
-    logger.info('formatting coingecko data for %s...', coingecko_id)
     data = r.json()
-    df = pd.DataFrame(data)
-    df = format_and_add_columns(df, coingecko_id)
-
-    return df
+    if r.status_code == 200:
+        df = pd.DataFrame(data)
+    else:
+        df = None
+    return df,r.status_code
 
 
 def upload_market_data(market_df):
