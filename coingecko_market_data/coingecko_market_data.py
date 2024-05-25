@@ -282,6 +282,56 @@ def upload_market_data(market_df):
     logger.info('appended upload df to %s.', table_name)
 
 
+def push_updates_to_bigquery():
+    '''
+    runs a sql query that inserts newly added rows in etl_pipelines.coin_market_data_coingecko \
+        into core.coin_market_data
+    '''
+    query_sql = '''
+    insert into core.coin_market_data (
+
+        select md.date
+        ,co.coin_id
+        ,co.chain_id
+        ,co.address
+        ,md.price
+
+        -- use fdv if market cap data isn't available
+        ,case 
+            when md.market_cap > 0 then md.market_cap
+            else cast(md.price*cgf.total_supply as int64)
+            end as market_cap
+
+        -- calculate fdv using total supply
+        ,cast(md.price*cgf.total_supply as int64) as fdv
+
+        -- calculate circulating supply using market cap
+        ,case
+            when md.market_cap > 0 then cast(md.market_cap/md.price as int64)
+            else cast(cgf.total_supply as int64)
+            end as circulating_supply
+
+        -- total supply retrieved from coingecko metadata tables
+        ,cast(cgf.total_supply as int64) as total_supply
+
+        ,md.volume
+        ,'coingecko' as data_source
+        ,md.updated_at
+        from core.coins co
+        join core.coingecko_facts cgf on cgf.coin_id = co.coin_id
+        join etl_pipelines.coin_market_data_coingecko md on md.coin_id = co.coin_id
+
+        -- don't insert rows that already have data
+        left join core.coin_market_data cmd on cmd.coin_id = md.coin_id and cmd.date = md.date
+        where cmd.date is null
+
+    )
+    '''
+
+    dgc().run_sql(query_sql)
+
+
+
 @functions_framework.cloud_event
 def update_coingecko_market_data():
     '''
@@ -328,3 +378,10 @@ def update_coingecko_market_data():
         except Exception as e:
             logger.error('an error occurred for coingecko_id %s: %s. continuing to next coin.', coingecko_id, e)
             continue
+
+    # add the new records to core.coin_market_data
+    logger.info('pushing new coingecko market data records to core.coin_market_data...')
+    push_updates_to_bigquery()
+
+    # and we're done
+    logger.info('update_coingecko_market_data() has completed successfully!')
