@@ -13,7 +13,7 @@ import functions_framework
 from dreams_core.googlecloud import GoogleCloud as dgc
 
 
-# retrieve list of coins with a coingecko_id that have no market data
+
 def retrieve_updates_df():
     '''
     pulls a list of tokens with coingecko ids from bigquery, limiting to coins that either \
@@ -214,7 +214,6 @@ def retrieve_coingecko_market_data(coingecko_id):
         elif api_status_code == 429:
             logger.info('coingecko api call timed out, retrying after a 60 second pause...')
             time.sleep(60)
-            retry_attempts -= 1
             continue
         else:
             logger.error('unexpected coingecko api status code %s for %s, continuing to next coin.',
