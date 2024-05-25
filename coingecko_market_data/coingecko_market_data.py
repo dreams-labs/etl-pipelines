@@ -25,13 +25,13 @@ def retrieve_updates_df():
 
     query_sql = '''
         with coingecko_data_status as (
-        select cgi.coin_id
-        ,cgi.coingecko_id
-        ,max(md.date) as most_recent_record
-        from `etl_pipelines.coin_coingecko_ids` cgi
-        left join `etl_pipelines.coin_market_data_coingecko` md on md.coingecko_id = cgi.coingecko_id
-        where cgi.coingecko_id is not null
-        group by 1,2
+            select cgi.coin_id
+            ,cgi.coingecko_id
+            ,max(md.date) as most_recent_record
+            from `etl_pipelines.coin_coingecko_ids` cgi
+            left join `etl_pipelines.coin_market_data_coingecko` md on md.coingecko_id = cgi.coingecko_id
+            where cgi.coingecko_id is not null
+            group by 1,2
         )
 
         select cds.coin_id
@@ -39,14 +39,15 @@ def retrieve_updates_df():
         ,cds.most_recent_record
         from coingecko_data_status cds
         where (
-        cds.most_recent_record is null
-        or cds.most_recent_record < (current_date('UTC') - 1)
-        )
+            cds.most_recent_record is null
+            or cds.most_recent_record < (current_date('UTC') - 1)
+            )
         '''
 
     updates_df = dgc().run_sql(query_sql)
 
     return updates_df
+
 
 
 def strip_and_format_unixtime(unix_time):
@@ -79,6 +80,7 @@ def strip_and_format_unixtime(unix_time):
     return formatted_datetime
 
 
+
 def replace_unix_timestamp(lst):
     '''
     utility function to replace coingecko tuple responses with unix timestamps into datetimes
@@ -91,6 +93,8 @@ def replace_unix_timestamp(lst):
     '''
     lst[0] = strip_and_format_unixtime(lst[0])
     return lst
+
+
 
 def format_and_add_columns(df, coingecko_id, coin_id, most_recent_record):
     '''
@@ -152,12 +156,14 @@ def format_and_add_columns(df, coingecko_id, coin_id, most_recent_record):
     return df
 
 
+
 def ping_coingecko_api(coingecko_id):
     '''
     requests market data for a given coingecko_id. 
 
-    note that no api key is used, as inputting a free plan api key in the headers causes the
-    call to error out. 
+    note that no api key is used, as inputting a free plan api key in the headers causes the \
+        call to error out. also stores the json response in cloud storage in case there any \
+        improper adjustments are later detected. 
 
     params:
         coingecko_id (str): coingecko id of coin
@@ -171,10 +177,17 @@ def ping_coingecko_api(coingecko_id):
 
     data = r.json()
     if r.status_code == 200:
+        # upload the raw response to cloud storage
+        filename = f"{coingecko_id}_{datetime.datetime.now(utc).strftime('%Y%m%d_%H%M')}.json"
+        dgc().gcs_upload_file(data, gcs_folder='data_lake/coingecko_market_data', filename=filename)
+
+        # convert json blob to a dataframe
         df = pd.DataFrame(data)
     else:
         df = None
+
     return df,r.status_code
+
 
 def retrieve_coingecko_market_data(coingecko_id):
     '''
@@ -211,6 +224,7 @@ def retrieve_coingecko_market_data(coingecko_id):
         coingecko_id, str(api_status_code))
 
     return market_df, api_status_code
+
 
 
 def upload_market_data(market_df):
@@ -280,6 +294,7 @@ def upload_market_data(market_df):
         ,api_method='load_csv'
     )
     logger.info('appended upload df to %s.', table_name)
+
 
 
 def push_updates_to_bigquery():
