@@ -1,0 +1,14 @@
+name: learn-github-actions
+run-name: ${{ github.actor }} is learning GitHub Actions
+on: 
+  push:
+    paths:
+      - github_actions_poc/**
+jobs:
+  github-poc:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: 'google-github-actions/auth@v4'
+      with:
+        project_id: 'etl-pipelines'
+        workload_identity_provider: 'projects/954736581165/locations/global/workloadIdentityPools/github-actions/providers/etl-pipelines'
