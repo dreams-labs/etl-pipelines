@@ -11,7 +11,7 @@ def hello_http(request):
         Response object using `make_response`
         <https://flask.palletsprojects.com/en/1.1.x/api/#flask.make_response>.
     """
-    print('looking for a safe 100x, pls send recs')
+    print('looking for a safe 1000x, pls send recs')
     
     request_json = request.get_json(silent=True)
     request_args = request.args
