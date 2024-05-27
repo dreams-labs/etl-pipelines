@@ -17,14 +17,10 @@ jobs:
       - id: 'auth'
         uses: 'google-github-actions/auth@v2'
         with:
-          create_credentials_file: 'true'
           project_id: 'western-verve-411004'
           workload_identity_provider: 'projects/954736581165/locations/global/workloadIdentityPools/github-actions/providers/github'
           service_account: 'github-actions-deployer@western-verve-411004.iam.gserviceaccount.com'
-      - id: 'gcloud'
-        name: 'gcloud'
-        run: |-
-          gcloud services list
+
       - id: 'deploy'
         uses: 'google-github-actions/deploy-cloud-functions@v3'
         timeout-minutes: 10
