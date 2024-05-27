@@ -7,6 +7,9 @@ run-name: ${{ github.actor }} is learning GitHub Actions
 on: [push]
 jobs:
   github-poc:
+    permissions:
+      contents: 'read'
+      id-token: 'write'
     runs-on: ubuntu-latest
     steps:
       - uses: 'actions/checkout@v4'
