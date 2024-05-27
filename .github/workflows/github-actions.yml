@@ -17,7 +17,7 @@ jobs:
       - id: 'auth'
         uses: 'google-github-actions/auth@v2'
         with:
-          project_id: 'dreams-labs-data'
+          project_id: 'western-verve-411004'
           workload_identity_provider: 'projects/954736581165/locations/global/workloadIdentityPools/github-actions/providers/github'
   
       - id: 'deploy'
