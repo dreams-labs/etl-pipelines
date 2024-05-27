@@ -1,6 +1,6 @@
 '''
-cloud function that updates the bigquery table `etl_pipelines.coin_market_data_coingecko` by making api \
-calls to coingecko to get market data and uploading it
+cloud function that updates the bigquery table `etl_pipelines.coin_market_data_coingecko` by \
+    making api calls to coingecko to get market data and uploading it
 '''
 import datetime
 import time
@@ -332,7 +332,7 @@ def push_updates_to_bigquery():
         ,'coingecko' as data_source
         ,md.updated_at
         from core.coins co
-        join core.coingecko_facts cgf on cgf.coin_id = co.coin_id
+        join core.coin_facts_coingecko cgf on cgf.coin_id = co.coin_id
         join etl_pipelines.coin_market_data_coingecko md on md.coin_id = co.coin_id
 
         -- don't insert rows that already have data
