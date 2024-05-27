@@ -18,7 +18,7 @@ jobs:
         uses: 'google-github-actions/auth@v2'
         with:
           project_id: 'dreams-labs-data'
-          workload_identity_provider: 'projects/954736581165/locations/global/workloadIdentityPools/github-actions/providers/etl-pipelines'
+          workload_identity_provider: 'projects/954736581165/locations/global/workloadIdentityPools/github-actions/providers/github'
   
       - id: 'deploy'
         uses: 'google-github-actions/deploy-cloud-functions@v3'
