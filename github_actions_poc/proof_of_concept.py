@@ -21,6 +21,6 @@ def hello_http(request):
     elif request_args and 'name' in request_args:
         name = request_args['name']
     else:
-        name = 'World with update and with roles/iam.workloadIdentityPoolAdmin'
+        name = 'World with update and with add principal to service account principal://iam.googleapis.com/projects/954736581165/locations/global/workloadIdentityPools/github-actions/subject/SUBJECT_ATTRIBUTE_VALUE'
     return 'Hello {}!'.format(name)
 
