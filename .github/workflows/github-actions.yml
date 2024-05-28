@@ -25,5 +25,5 @@ jobs:
         uses: 'google-github-actions/deploy-cloud-functions@v3'
         timeout-minutes: 10
         with:
-          name: 'github_actions_proof_of_concept '
+          name: 'github_actions_proof_of_concept'
           runtime: 'python311'
