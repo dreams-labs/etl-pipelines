@@ -21,6 +21,6 @@ def hello_http(request):
     elif request_args and 'name' in request_args:
         name = request_args['name']
     else:
-        name = 'World with update'
+        name = 'World with update and with roles/iam.serviceAccountTokenCreator'
     return 'Hello {}!'.format(name)
 
