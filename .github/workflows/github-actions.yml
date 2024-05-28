@@ -26,5 +26,5 @@ jobs:
         timeout-minutes: 10
         with:
           source_dir: 'github_actions_poc/'
-          name: 'github_actions_proof_of_concept '
+          name: 'github_actions_proof_of_concept'
           runtime: 'python311'
