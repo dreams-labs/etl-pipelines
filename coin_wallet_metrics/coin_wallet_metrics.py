@@ -9,19 +9,32 @@ import numpy as np
 from dreams_core.googlecloud import GoogleCloud as dgc
 
 
+def configure_logger():
+    '''
+    retrieves an existing logger if one exists, otherwise creates a new silent logger object
+
+    returns:
+    - logger (logging object): a logger object that either retains existing logging settings or \
+        creates a new silent logger
+    '''
+    logger = logging.getLogger(__name__)
+    if not logger.handlers:
+        handler = logging.NullHandler()
+        logger.addHandler(handler)
+
+    return logger
+
 
 def prepare_datasets():
     '''
     retrieves the dfs necessary for wallet metric calculation
 
     returns:
-        metadata_df (df): includes metadata about each coin such as total supply
-        all_balances_df (df): includes the daily wallet data necessary to calculate relevant metrics
+    - metadata_df (df): includes metadata about each coin such as total supply
+    - all_balances_df (df): includes the daily wallet data necessary to calculate relevant metrics
 
     '''
-    # logging setup
-    logger = logging.getLogger(__name__)
-    logger.addHandler(logging.NullHandler())
+    logger = configure_logger()
     start_time = time.time()
     logger.debug('Retrieving datasets required for wallet balance metrics...')
 
@@ -61,11 +74,11 @@ def generate_wallet_bins(total_supply):
     defines bins for wallet balances based on what percent of total supply they own
 
     params:
-        total_supply (float): total supply of the coin
+    - total_supply (float): total supply of the coin
 
     returns:
-        wallet_bins (list of floats): the number of tokens a wallet needs to be included in a bin
-        wallet_labels (list of strings): the label for each bin
+    - wallet_bins (list of floats): the number of tokens a wallet needs to be included in a bin
+    - wallet_labels (list of strings): the label for each bin
     '''
 
     # defining bin boundaries
@@ -122,15 +135,14 @@ def calculate_wallet_counts(balances_df,total_supply):
         percentage of total supply
 
     params:
-        balances_df (dataframe): df showing daily wallet balances of a coin_id token that \
-            has been filtered to only include one coin_id. 
-        total_supply (float): the total supply of the coin
+    - balances_df (dataframe): df showing daily wallet balances of a coin_id token that \
+        has been filtered to only include one coin_id. 
+    - total_supply (float): the total supply of the coin
 
     returns:
-        wallets_df (dataframe): df of wallet counts based on percent of total supply
+    - wallets_df (dataframe): df of wallet counts based on percent of total supply
     '''
-    logger = logging.getLogger(__name__)
-    logger.addHandler(logging.NullHandler())
+    logger = configure_logger()
     start_time = time.time()
 
     # Calculate total supply and generate wallet bins
@@ -171,14 +183,13 @@ def calculate_buyer_counts(balances_df):
         'buyers_repeat' column. 
 
     params:
-        balances_df (dataframe): df showing daily wallet balances of a coin_id token that \
-            has been filtered to only include one coin_id. 
+    - balances_df (dataframe): df showing daily wallet balances of a coin_id token that \
+        has been filtered to only include one coin_id. 
     
     returns:
-        buyers_df (dataframe): df of the number of new and repeat buyers on each date
+    - buyers_df (dataframe): df of the number of new and repeat buyers on each date
     '''
-    logger = logging.getLogger(__name__)
-    logger.addHandler(logging.NullHandler())
+    logger = configure_logger()
     start_time = time.time()
 
     # Ensure 'date' column is of datetime type
@@ -197,35 +208,34 @@ def calculate_buyer_counts(balances_df):
     return buyers_df
 
 
-
-def gini_coefficient(arr):
-    '''computes the gini coefficient of a series'''
-    arr = np.asarray(arr)
-    if len(arr) == 0:
-        return None
-    arr = arr.flatten()
-    diff_sum = np.sum(np.abs(np.subtract.outer(arr, arr)))
-    return diff_sum / (2 * len(arr) * np.sum(arr))
-
 def calculate_daily_gini(balances_df):
     '''
     Calculates the Gini coefficient for the distribution of wallet balances for each date.
 
-    balances_df (dataframe): df showing daily wallet balances of a coin_id token that \
+    params:
+    - balances_df (dataframe): df showing daily wallet balances of a coin_id token that \
         has been filtered to only include one coin_id. 
 
     returns:
-        DataFrame: A DataFrame with dates as the index and the Gini coefficients as the values.
+    - gini_df (dataframe): df with dates as the index and the Gini coefficients as the values.
     '''
-    logger = logging.getLogger(__name__)
-    logger.addHandler(logging.NullHandler())
+    logger = wm.configure_logger()
     start_time = time.time()
 
-    # Group by date and wallet address to get the most recent balance for each wallet each day
-    daily_balances = balances_df.groupby(['date', 'wallet_address']).last().reset_index()
+    # Get the most recent balance for each wallet each day
+    balances_df = balances_df.sort_values(by=['wallet_address', 'date'])
+    daily_balances = balances_df.drop_duplicates(subset=['wallet_address', 'date'], keep='last')
+
+    def efficient_gini(arr):
+        arr = np.sort(arr)
+        n = len(arr)
+        if n == 0:
+            return None
+        index = np.arange(1, n + 1)
+        return (2 * np.sum(index * arr) - (n + 1) * np.sum(arr)) / (n * np.sum(arr))
 
     # Calculate Gini coefficient for each day
-    gini_coefficients = daily_balances.groupby('date')['balance'].apply(gini_coefficient)
+    gini_coefficients = daily_balances.groupby('date')['balance'].apply(efficient_gini)
 
     # Convert the Series to a DataFrame for better readability
     gini_df = gini_coefficients.reset_index(name='gini_coefficient')
@@ -235,19 +245,21 @@ def calculate_daily_gini(balances_df):
     return gini_df
 
 
+
 def calculate_gini_without_mega_whales(balances_df, total_supply):
     '''
     computes the gini coefficient while ignoring wallets that have ever held >5% of \
         the total supply. the hope is that this removes treasury accounts, burn addresses, \
         and other wallets that are not likely to be wallet owners. 
 
+
     params:
-        balances_df (dataframe): df showing daily wallet balances of a coin_id token that \
-            has been filtered to only include one coin_id. 
-        total_supply (float): total supply of the coin
+    - balances_df (dataframe): df showing daily wallet balances of a coin_id token that \
+        has been filtered to only include one coin_id. 
+    - total_supply (float): the total supply of the coin
 
     returns:
-        gini_filtered_df (dataframe): df of gini coefficient without mega whales
+    - gini_filtered_df (dataframe): df of gini coefficient without mega whales
     '''
     # filter out addresses that have ever owned 5% or more supply
     mega_whales = balances_df[balances_df['balance']>=(total_supply*0.05)]['wallet_address'].unique()
@@ -266,30 +278,32 @@ def calculate_coin_metrics(metadata_df,balances_df):
     Calculate various metrics for a specific cryptocurrency coin and merge them into a single df.
 
     Parameters:
-    - all_balances_df (df): Contains balance information on all dates for all coins.
-    - all_metadata_df (df): Contains containing metadata for all coins.
+    - all_balances_df (dataframe): Contains balance information on all dates for all coins.
+    - all_metadata_df (dataframe): Contains containing metadata for all coins.
     - coin_id (str): The coin ID to calculate metrics for.
 
     Returns:
-    - coin_metrics_df (df): Contains the calculated metrics and metadata for the specified coin.
+    - coin_metrics_df (dataframe): Contains the calculated metrics and metadata for the specified coin.
     '''
+    logger = configure_logger()
+    logger.info('Calculating metrics for %s', metadata_df['symbol'].iloc[0])
+    total_supply = metadata_df['total_supply'].iloc[0]
 
     # Calculate Metrics
     # -----------------
-    total_supply = metadata_df['total_supply'].iloc[0]
-
+    
     # Metric 1: Wallets by Ownership
     # Shows what whale wallets and small wallets are doing
-    wallets_by_ownership_df = cwm.calculate_wallet_counts(balances_df, total_supply)
+    wallets_by_ownership_df = calculate_wallet_counts(balances_df, total_supply)
 
     # Metric 2: Buyers New vs Repeat
     # Shows how many daily buyers are first-time vs repeat buyers
-    buyers_new_vs_repeat_df = cwm.calculate_buyer_counts(balances_df)
+    buyers_new_vs_repeat_df = calculate_buyer_counts(balances_df)
 
     # Metric 3: Gini Coefficients
     # Gini coefficients based on wallet balances
-    gini_df = cwm.calculate_daily_gini(balances_df)
-    gini_df_excl_mega_whales = cwm.calculate_gini_without_mega_whales(balances_df, total_supply)
+    gini_df = calculate_daily_gini(balances_df)
+    gini_df_excl_mega_whales = calculate_gini_without_mega_whales(balances_df, total_supply)
 
 
     # Merge All Metrics into One DataFrame
@@ -297,6 +311,7 @@ def calculate_coin_metrics(metadata_df,balances_df):
     metrics_dfs = [
         wallets_by_ownership_df,
         buyers_new_vs_repeat_df,
+        gini_df,
         gini_df_excl_mega_whales
     ]
     coin_metrics_df = metrics_dfs[0]
