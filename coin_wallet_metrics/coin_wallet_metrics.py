@@ -255,6 +255,58 @@ def calculate_gini_without_mega_whales(balances_df, total_supply):
 
     # calculate gini
     gini_filtered_df = calculate_daily_gini(balances_df_filtered)
-    gini_filtered_df.rename(columns={'gini_coefficient': 'gini_coefficient_no_mega_whales'}, inplace=True)
+    gini_filtered_df.rename(columns={'gini_coefficient': 'gini_coefficient_excl_mega_whales'}, inplace=True)
 
     return gini_filtered_df
+
+
+
+def calculate_coin_metrics(metadata_df,balances_df):
+    '''
+    Calculate various metrics for a specific cryptocurrency coin and merge them into a single df.
+
+    Parameters:
+    - all_balances_df (df): Contains balance information on all dates for all coins.
+    - all_metadata_df (df): Contains containing metadata for all coins.
+    - coin_id (str): The coin ID to calculate metrics for.
+
+    Returns:
+    - coin_metrics_df (df): Contains the calculated metrics and metadata for the specified coin.
+    '''
+
+    # Calculate Metrics
+    # -----------------
+    total_supply = metadata_df['total_supply'].iloc[0]
+
+    # Metric 1: Wallets by Ownership
+    # Shows what whale wallets and small wallets are doing
+    wallets_by_ownership_df = cwm.calculate_wallet_counts(balances_df, total_supply)
+
+    # Metric 2: Buyers New vs Repeat
+    # Shows how many daily buyers are first-time vs repeat buyers
+    buyers_new_vs_repeat_df = cwm.calculate_buyer_counts(balances_df)
+
+    # Metric 3: Gini Coefficients
+    # Gini coefficients based on wallet balances
+    gini_df = cwm.calculate_daily_gini(balances_df)
+    gini_df_excl_mega_whales = cwm.calculate_gini_without_mega_whales(balances_df, total_supply)
+
+
+    # Merge All Metrics into One DataFrame
+    # ------------------------------------
+    metrics_dfs = [
+        wallets_by_ownership_df,
+        buyers_new_vs_repeat_df,
+        gini_df_excl_mega_whales
+    ]
+    coin_metrics_df = metrics_dfs[0]
+    for df in metrics_dfs[1:]:
+        coin_metrics_df = coin_metrics_df.join(df, how='outer')
+
+    # reset index
+    coin_metrics_df = coin_metrics_df.reset_index().rename(columns={'index': 'date'})
+
+    # add metadata columns
+    coin_metrics_df = coin_metrics_df.assign(**metadata_df.iloc[0])
+
+    return coin_metrics_df
