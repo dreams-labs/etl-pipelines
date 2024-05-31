@@ -4,6 +4,8 @@ calculates metrics related to the distribution of coin ownership across wallets
 
 import logging
 import time
+from datetime import datetime
+from pytz import utc
 import pandas as pd
 import numpy as np
 from dreams_core.googlecloud import GoogleCloud as dgc
@@ -168,6 +170,9 @@ def calculate_wallet_counts(balances_df,total_supply):
     date_range = pd.date_range(start=wallets_df.index.min(), end=wallets_df.index.max(), freq='D')
     wallets_df = wallets_df.reindex(date_range, fill_value=0)
 
+    # Fill empty cells with 0s
+    wallets_df.fillna(0, inplace=True)
+
     logger.debug('Duration to aggregate daily wallet counts: %.2f seconds', time.time() - step_time)
     logger.info('Daily balance calculations complete after %.2f seconds', time.time() - start_time)
 
@@ -203,6 +208,10 @@ def calculate_buyer_counts(balances_df):
 
     # Set 'date' as the index
     buyers_df.set_index('date', inplace=True)
+
+    # Fill empty cells with 0s
+    buyers_df.fillna(0, inplace=True)
+
     logger.info('New vs repeat buyer counts complete after %.2f seconds', time.time() - start_time)
 
     return buyers_df
@@ -219,7 +228,7 @@ def calculate_daily_gini(balances_df):
     returns:
     - gini_df (dataframe): df with dates as the index and the Gini coefficients as the values.
     '''
-    logger = wm.configure_logger()
+    logger = configure_logger()
     start_time = time.time()
 
     # Get the most recent balance for each wallet each day
@@ -288,6 +297,7 @@ def calculate_coin_metrics(metadata_df,balances_df):
     logger = configure_logger()
     logger.info('Calculating metrics for %s', metadata_df['symbol'].iloc[0])
     total_supply = metadata_df['total_supply'].iloc[0]
+    coin_id = metadata_df['coin_id'].iloc[0]
 
     # Calculate Metrics
     # -----------------
@@ -321,7 +331,108 @@ def calculate_coin_metrics(metadata_df,balances_df):
     # reset index
     coin_metrics_df = coin_metrics_df.reset_index().rename(columns={'index': 'date'})
 
-    # add metadata columns
-    coin_metrics_df = coin_metrics_df.assign(**metadata_df.iloc[0])
+    # add coin_id
+    coin_metrics_df['coin_id'] = coin_id
 
     return coin_metrics_df
+
+
+
+def upload_coin_metrics_data(all_coin_metrics_df):
+    '''
+    Appends the all_coin_metrics_df to the BigQuery table etl_pipelines.coin_metrics_data. 
+
+    Steps:
+        1. Explicitly map datatypes onto new dataframe upload_df
+        2. Declare schema datatypes
+        3. Upload using pandas_gbq
+
+    Params:
+        all_coin_metrics_df (pandas.DataFrame): df of coin metrics data
+    Returns:
+        None
+    '''
+    logger = logging.getLogger(__name__)
+
+    # Add metadata to upload_df
+    upload_df = all_coin_metrics_df.copy()
+    upload_df['updated_at'] = datetime.now(utc)
+
+    # Localize date column
+    upload_df['date'] = pd.to_datetime(upload_df['date']).dt.tz_localize(utc)
+
+    # Set df datatypes of upload df
+    dtype_mapping = {
+        'date': 'datetime64[us, UTC]',
+        'wallets_0p00010_pct': int,
+        'wallets_0p00018_pct': int,
+        'wallets_0p00032_pct': int,
+        'wallets_0p00056_pct': int,
+        'wallets_0p0010_pct': int,
+        'wallets_0p0018_pct': int,
+        'wallets_0p0032_pct': int,
+        'wallets_0p0056_pct': int,
+        'wallets_0p010_pct': int,
+        'wallets_0p018_pct': int,
+        'wallets_0p032_pct': int,
+        'wallets_0p056_pct': int,
+        'wallets_0p10_pct': int,
+        'wallets_0p18_pct': int,
+        'wallets_0p32_pct': int,
+        'wallets_0p56_pct': int,
+        'wallets_1p0_pct': int,
+        'buyers_new': int,
+        'buyers_repeat': int,
+        'gini_coefficient': float,
+        'gini_coefficient_excl_mega_whales': float,
+        'coin_id': str,
+        'updated_at': 'datetime64[us, UTC]'
+    }
+    upload_df = upload_df.astype(dtype_mapping)
+    logger.info('Prepared upload df with %s rows.', len(upload_df))
+
+    # Reorder columns to have coin_id first
+    upload_df = upload_df[['coin_id'] + [col for col in upload_df.columns if col != 'coin_id']]
+
+    # Upload df to BigQuery
+    project_id = 'western-verve-411004'
+    table_name = 'core.coin_wallet_metrics'
+    schema = [
+        {'name': 'coin_id', 'type': 'string'},
+        {'name': 'date', 'type': 'datetime'},
+        {'name': 'wallets_0p00010_pct', 'type': 'int'},
+        {'name': 'wallets_0p00018_pct', 'type': 'int'},
+        {'name': 'wallets_0p00032_pct', 'type': 'int'},
+        {'name': 'wallets_0p00056_pct', 'type': 'int'},
+        {'name': 'wallets_0p0010_pct', 'type': 'int'},
+        {'name': 'wallets_0p0018_pct', 'type': 'int'},
+        {'name': 'wallets_0p0032_pct', 'type': 'int'},
+        {'name': 'wallets_0p0056_pct', 'type': 'int'},
+        {'name': 'wallets_0p010_pct', 'type': 'int'},
+        {'name': 'wallets_0p018_pct', 'type': 'int'},
+        {'name': 'wallets_0p032_pct', 'type': 'int'},
+        {'name': 'wallets_0p056_pct', 'type': 'int'},
+        {'name': 'wallets_0p10_pct', 'type': 'int'},
+        {'name': 'wallets_0p18_pct', 'type': 'int'},
+        {'name': 'wallets_0p32_pct', 'type': 'int'},
+        {'name': 'wallets_0p56_pct', 'type': 'int'},
+        {'name': 'wallets_1p0_pct', 'type': 'int'},
+        {'name': 'buyers_new', 'type': 'int'},
+        {'name': 'buyers_repeat', 'type': 'int'},
+        {'name': 'gini_coefficient', 'type': 'float'},
+        {'name': 'gini_coefficient_excl_mega_whales', 'type': 'float'},
+        {'name': 'updated_at', 'type': 'datetime'}
+    ]
+
+    pandas_gbq.to_gbq(
+        upload_df,
+        table_name,
+        project_id=project_id,
+        if_exists='replace',
+        table_schema=schema,
+        progress_bar=False
+    )
+    logger.info('Replaced data in %s.', table_name)
+
+
+upload_coin_metrics_data(all_coin_metrics_df)
