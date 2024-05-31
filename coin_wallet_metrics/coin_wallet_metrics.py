@@ -1,6 +1,7 @@
 '''
 calculates metrics related to the distribution of coin ownership across wallets
 '''
+# pylint: disable=C0301
 
 import logging
 import time
@@ -9,6 +10,7 @@ from pytz import utc
 import pandas as pd
 import numpy as np
 from dreams_core.googlecloud import GoogleCloud as dgc
+import pandas_gbq
 
 
 def configure_logger():
@@ -64,7 +66,7 @@ def prepare_datasets():
     # run sql queries
     metadata_df = dgc().run_sql(metadata_sql)
     all_balances_df = dgc().run_sql(balances_sql)
-    
+
     logger.info('Wallet balance datasets retrieved after %.2f seconds.', time.time() - start_time)
 
     return metadata_df,all_balances_df
@@ -199,7 +201,7 @@ def calculate_buyer_counts(balances_df):
 
     # Ensure 'date' column is of datetime type
     balances_df['date'] = pd.to_datetime(balances_df['date'])
-    
+
     # Group by 'date' and calculate the counts
     buyers_df = balances_df.groupby('date').agg(
         buyers_new = ('buy_sequence', lambda x: (x == 1).sum()),
@@ -301,7 +303,7 @@ def calculate_coin_metrics(metadata_df,balances_df):
 
     # Calculate Metrics
     # -----------------
-    
+
     # Metric 1: Wallets by Ownership
     # Shows what whale wallets and small wallets are doing
     wallets_by_ownership_df = calculate_wallet_counts(balances_df, total_supply)
@@ -433,6 +435,3 @@ def upload_coin_metrics_data(all_coin_metrics_df):
         progress_bar=False
     )
     logger.info('Replaced data in %s.', table_name)
-
-
-upload_coin_metrics_data(all_coin_metrics_df)
