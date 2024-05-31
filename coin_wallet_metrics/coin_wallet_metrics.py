@@ -10,6 +10,7 @@ from pytz import utc
 import pandas as pd
 import numpy as np
 from dreams_core.googlecloud import GoogleCloud as dgc
+import functions_framework
 import pandas_gbq
 
 
@@ -67,7 +68,7 @@ def prepare_datasets():
     metadata_df = dgc().run_sql(metadata_sql)
     all_balances_df = dgc().run_sql(balances_sql)
 
-    logger.info('Wallet balance datasets retrieved after %.2f seconds.', time.time() - start_time)
+    logger.debug('Wallet balance datasets retrieved after %.2f seconds.', time.time() - start_time)
 
     return metadata_df,all_balances_df
 
@@ -162,9 +163,6 @@ def calculate_wallet_counts(balances_df,total_supply):
     # Classify each balance into ownership percentage bins
     balances_df['wallet_types'] = pd.cut(balances_df['balance'], bins=wallet_bins, labels=wallet_labels)
 
-    logger.debug('Duration to classify by size: %s.2f seconds', time.time() - start_time)
-    step_time = time.time()
-
     # Group by date and wallet type, then count the number of occurrences
     wallets_df = balances_df.groupby(['date', 'wallet_types'], observed=False).size().unstack(fill_value=0)
 
@@ -175,8 +173,7 @@ def calculate_wallet_counts(balances_df,total_supply):
     # Fill empty cells with 0s
     wallets_df.fillna(0, inplace=True)
 
-    logger.debug('Duration to aggregate daily wallet counts: %.2f seconds', time.time() - step_time)
-    logger.info('Daily balance calculations complete after %.2f seconds', time.time() - start_time)
+    logger.debug('Daily balance calculations complete after %.2f seconds', time.time() - start_time)
 
     return wallets_df
 
@@ -214,7 +211,7 @@ def calculate_buyer_counts(balances_df):
     # Fill empty cells with 0s
     buyers_df.fillna(0, inplace=True)
 
-    logger.info('New vs repeat buyer counts complete after %.2f seconds', time.time() - start_time)
+    logger.debug('New vs repeat buyer counts complete after %.2f seconds', time.time() - start_time)
 
     return buyers_df
 
@@ -252,7 +249,7 @@ def calculate_daily_gini(balances_df):
     gini_df = gini_coefficients.reset_index(name='gini_coefficient')
     gini_df.set_index('date', inplace=True)
 
-    logger.info('Daily gini coefficients complete after %.2f seconds', time.time() - start_time)
+    logger.debug('Daily gini coefficients complete after %.2f seconds', time.time() - start_time)
     return gini_df
 
 
@@ -435,3 +432,40 @@ def upload_coin_metrics_data(all_coin_metrics_df):
         progress_bar=False
     )
     logger.info('Replaced data in %s.', table_name)
+
+
+
+@functions_framework.cloud_event
+def update_coin_wallet_metrics():
+    '''
+    runs all functions in sequence to update and upload core.coin_wallet_metrics
+    '''
+    # configure logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
+        datefmt='%d/%b/%Y %H:%M:%S'
+        )
+
+    # retrieve full sets of metadata and daily wallet balances
+    all_metadata_df,all_balances_df = prepare_datasets()
+
+    # prepare list and df for loop iteration
+    unique_coin_ids = all_balances_df['coin_id'].unique().tolist()
+    all_coin_metrics_df = pd.DataFrame()
+
+    # generate metrics for all coins
+    for c in unique_coin_ids:
+        # retrieve coin-specific dfs
+        metadata_df = all_metadata_df[all_metadata_df['coin_id']==c].copy()
+        balances_df = all_balances_df[all_balances_df['coin_id']==c].copy()
+
+        # calculate and merge metrics
+        coin_metrics_df = calculate_coin_metrics(metadata_df,balances_df)
+
+        # fill zeros for missing dates (currently impacts buyer behavior and gini columns)
+        all_coin_metrics_df.fillna(0, inplace=True)
+        all_coin_metrics_df = pd.concat([all_coin_metrics_df,coin_metrics_df])
+
+    # upload metrics to bigquery
+    upload_coin_metrics_data(all_coin_metrics_df)
