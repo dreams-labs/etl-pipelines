@@ -842,7 +842,7 @@ def retrieve_call_metadata(
 
 # Triggered via HTTP
 @functions_framework.http
-def process_community_calls(cloud_event):
+def process_community_calls(request):
     verbose=True
 
     # load secrets
@@ -936,4 +936,4 @@ def process_community_calls(cloud_event):
         ,verbose=True
     )
 
-    return(upload_df.shape[0])
+    return(f'Completed processing community calls. Added {upload_df.shape[0]} additional calls.')
