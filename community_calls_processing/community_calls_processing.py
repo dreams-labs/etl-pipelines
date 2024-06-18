@@ -840,8 +840,8 @@ def retrieve_call_metadata(
     return calls_df_processed
 
 
-# Triggered from a message on a Cloud Pub/Sub topic.
-@functions_framework.cloud_event
+# Triggered via HTTP
+@functions_framework.http
 def process_community_calls(cloud_event):
     verbose=True
 
@@ -935,3 +935,5 @@ def process_community_calls(cloud_event):
         ,worksheet='gcf_calls_manual'
         ,verbose=True
     )
+
+    return(upload_df.shape[0])
