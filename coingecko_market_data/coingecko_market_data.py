@@ -346,8 +346,8 @@ def push_updates_to_bigquery():
 
 
 
-@functions_framework.cloud_event
-def update_coingecko_market_data():
+@functions_framework.http
+def update_coingecko_market_data(request):
     '''
     runs all functions in sequence to update and upload coingecko market data
     '''
