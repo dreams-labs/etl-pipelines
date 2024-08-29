@@ -5,6 +5,7 @@ cloud function that updates the bigquery table `etl_pipelines.coin_market_data_c
 import datetime
 import time
 import logging
+import os
 from pytz import utc
 import pandas as pd
 import requests
@@ -172,7 +173,9 @@ def ping_coingecko_api(coingecko_id):
         df (dataframe): formatted df of market data
         status_code (int): status code of coingecko api call
     '''
-    url = f'https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=365&interval=daily'
+    api_key = os.getenv('COINGECKO_API_KEY')
+
+    url = f'https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=365&interval=daily&x_cg_demo_api_key={api_key}'
     r = requests.get(url, timeout=30)
 
     data = r.json()
@@ -397,5 +400,4 @@ def update_coingecko_market_data(request):
     logger.info('pushing new coingecko market data records to core.coin_market_data...')
     push_updates_to_bigquery()
 
-    # and we're done
-    logger.info('update_coingecko_market_data() has completed successfully!')
+    logger.info('update_coingecko_market_data() completed successfully.')
