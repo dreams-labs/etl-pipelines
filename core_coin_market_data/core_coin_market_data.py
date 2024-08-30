@@ -12,6 +12,23 @@ from dreams_core.googlecloud import GoogleCloud as dgc
 
 
 
+def get_coin_market_data_record_count():
+    '''
+    retrieves the count of total records in core.coin_market_data for logging purposes
+    '''
+
+    query_sql = '''
+        select count(*) as records
+        from core.coin_market_data
+        '''
+
+    df = dgc().run_sql(query_sql)
+    records = df.iloc[0, 0]
+
+    return records
+
+
+
 def insert_coingecko_market_data():
     '''
     adds new records in etl_pipelines.coin_market_data_coingecko to core.coin_market_data after 
@@ -62,21 +79,6 @@ def insert_coingecko_market_data():
     dgc().run_sql(query_sql)
 
 
-def get_coin_market_data_record_count():
-    '''
-    retrieves the count of total records in core.coin_market_data for logging purposes
-    '''
-
-    query_sql = '''
-        select count(*) as records
-        from core.coin_market_data
-        '''
-
-    df = dgc().run_sql(query_sql)
-    records = df.iloc[0, 0]
-
-    return records
-
 
 @functions_framework.http
 def update_coin_market_data(request):
@@ -93,13 +95,15 @@ def update_coin_market_data(request):
 
     # retrieve initial record count
     initial_records = get_coin_market_data_record_count()
+    logger.info(f'initial core.coin_market_data records: {initial_records}')
 
     # insert new coingecko market data records to core.coin_market_data
     insert_coingecko_market_data()
 
     # calculate the number of records added
-    new_records = get_coin_market_data_record_count() - initial_records
-
+    updated_records = get_coin_market_data_record_count()
+    new_records = updated_records - initial_records
+    logger.info(f'updated core.coin_market_data records: {updated_records}')
     logger.info(f'refreshed core.coin_market_data with {new_records} new coingecko records.')
 
     return f'{{"status":"200", "new_records": "{new_records}"}}'

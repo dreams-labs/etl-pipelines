@@ -368,6 +368,12 @@ def update_coingecko_market_data(request):
     # retrieve market data for each coin in need of updates
     for i in range(updates_df.shape[0]):
         try:
+
+            # pause to avoid rate limit issues caused by cloud function repeating loop too quickly
+            # which seems to create too many instances
+            if i > 0:
+                time.sleep(3)
+            
             # store iteration-specific variables
             coingecko_id = updates_df['coingecko_id'][i]
             coin_id = updates_df['coin_id'][i]
@@ -401,3 +407,5 @@ def update_coingecko_market_data(request):
     push_updates_to_bigquery()
 
     logger.info('update_coingecko_market_data() completed successfully.')
+
+    return f'{{"status":"200"}}'
