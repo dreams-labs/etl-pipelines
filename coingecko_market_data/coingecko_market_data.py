@@ -5,6 +5,7 @@ cloud function that updates the bigquery table `etl_pipelines.coin_market_data_c
 import datetime
 import time
 import logging
+import os
 from pytz import utc
 import pandas as pd
 import requests
@@ -172,7 +173,9 @@ def ping_coingecko_api(coingecko_id):
         df (dataframe): formatted df of market data
         status_code (int): status code of coingecko api call
     '''
-    url = f'https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=365&interval=daily'
+    api_key = os.getenv('COINGECKO_API_KEY')
+
+    url = f'https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=365&interval=daily&x_cg_demo_api_key={api_key}'
     r = requests.get(url, timeout=30)
 
     data = r.json()
@@ -346,8 +349,8 @@ def push_updates_to_bigquery():
 
 
 
-@functions_framework.cloud_event
-def update_coingecko_market_data():
+@functions_framework.http
+def update_coingecko_market_data(request):
     '''
     runs all functions in sequence to update and upload coingecko market data
     '''
@@ -365,6 +368,12 @@ def update_coingecko_market_data():
     # retrieve market data for each coin in need of updates
     for i in range(updates_df.shape[0]):
         try:
+
+            # pause to avoid rate limit issues caused by cloud function repeating loop too quickly
+            # which seems to create too many instances
+            if i > 0:
+                time.sleep(3)
+            
             # store iteration-specific variables
             coingecko_id = updates_df['coingecko_id'][i]
             coin_id = updates_df['coin_id'][i]
@@ -397,5 +406,6 @@ def update_coingecko_market_data():
     logger.info('pushing new coingecko market data records to core.coin_market_data...')
     push_updates_to_bigquery()
 
-    # and we're done
-    logger.info('update_coingecko_market_data() has completed successfully!')
+    logger.info('update_coingecko_market_data() completed successfully.')
+
+    return f'{{"status":"200"}}'
