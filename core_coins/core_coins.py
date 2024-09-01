@@ -264,4 +264,3 @@ def update_core_coins(request):
     )
 
     return f'{{"finished updating core.coins to {total_coins} records ({total_new_coins} newly added)"}}'
-
