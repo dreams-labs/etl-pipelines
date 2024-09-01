@@ -28,6 +28,7 @@ def coingecko_metadata_search(
     # get logger
     logger = logging.getLogger(__name__)
 
+
     # making the api call
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
 
@@ -46,6 +47,7 @@ def coingecko_metadata_search(
         search_log = str(response_data)
         logger.info('FAILUIRE: search failed for <%s:%s>', blockchain, address)
         logger.info('%s',str(response_data))
+
 
     # storing json in gcs
     if search_successful:
