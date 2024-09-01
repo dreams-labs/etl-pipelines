@@ -7,7 +7,6 @@ import os
 import requests
 import json
 from google.cloud import bigquery
-from google.auth import default
 from google.cloud import storage
 from dreams_core.googlecloud import GoogleCloud as dgc
 
@@ -53,6 +52,9 @@ def coingecko_metadata_search(blockchain, address, coin_id):
     # get logger
     logger = logging.getLogger(__name__)
 
+    # get GCP credentials
+    credentials = dgc().credentials
+
     # making the api call
     response_data = fetch_coingecko_data(blockchain, address)
 
@@ -73,7 +75,7 @@ def coingecko_metadata_search(blockchain, address, coin_id):
         filepath = 'data_lake/coingecko_coin_metadata/'
         filename = str(response_data['id'] + '.json')
 
-        client = storage.Client(project='dreams-labs-data')
+        client = storage.Client(credentials=credentials, project='dreams-labs-data')
         bucket = client.get_bucket('dreams-labs-storage')
 
         blob = bucket.blob(filepath + filename)
@@ -82,7 +84,7 @@ def coingecko_metadata_search(blockchain, address, coin_id):
         logger.info('%s uploaded successfully', filename)
 
     # store search result in etl_pipelines.coin_coingecko_ids
-    client = bigquery.Client()
+    client = bigquery.Client(credentials=credentials, project='dreams-labs-data')
     table_id = 'western-verve-411004.etl_pipelines.coin_coingecko_ids'
 
     rows_to_insert = [{
@@ -119,10 +121,15 @@ def retrieve_coingecko_metadata(request):
         ,ch.chain_text_coingecko
         ,cc.address
         from core.coins cc
-        left join core.chains ch on ch.chain_id = cc.chain_id
+        join core.chains ch on ch.chain_id = cc.chain_id
         left join etl_pipelines.coin_coingecko_ids cgi on cgi.coin_id = cc.coin_id
-            and cgi.search_log = "{'error': 'coin not found'}" -- removes coins that could not be found while reattempting api timeouts
+            and cgi.search_log in ( -- this join filter allows coins that failed due to api errors to be reattempted
+                "search successful", -- do not reattempt coins that are already matched
+                "{'error': 'coin not found'}" -- do not reattempt addresses that could not be found
+            )
         where cc.address is not null -- removes coins without addresses
+        and cgi.coin_id is null
+        group by 1,2,3
         limit 5
         '''
 
@@ -143,5 +150,7 @@ def retrieve_coingecko_metadata(request):
             )
 
         # rate limit pause
-        logger.info('pausing `15` seconds to avoid coingecko api rate limit issues...')
+        logger.info('pausing 15 seconds to avoid coingecko api rate limit issues...')
         time.sleep(15)
+
+    return "coingecko metadata update completed."
