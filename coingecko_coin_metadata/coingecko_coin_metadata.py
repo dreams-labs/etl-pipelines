@@ -1,42 +1,19 @@
-import base64
 import functions_framework
 import pandas as pd
 import time
 import datetime
-import math
+import logging
 import os
 import requests
 import json
 from google.cloud import bigquery
 from google.auth import default
 from google.cloud import storage
+from dreams_core.googlecloud import GoogleCloud as dgc
 
-# core python begins here
-def run_bigquery_sql(
-        query_sql
-        ,location='US'
-        ,project = 'western-verve-411004'
-    ):
-    '''
-    returns the blockchain and contract address of a coin on coingecko
-
-    param: query_sql <string> the query to run
-    param: location <string> the location of the bigquery project
-    param: project <string> the project ID of the bigquery project
-    return: query_df <dataframe> the query result
-    '''
-
-    # Create a BigQuery client object.
-    client = bigquery.Client(project=project,location=location)
-
-    query_job = client.query(query_sql)
-    query_df = query_job.to_dataframe()
-
-    return(query_df)
 
 def coingecko_metadata_search(
-        coingecko_api_key
-        ,blockchain
+        blockchain
         ,address
         ,coin_id
     ):
@@ -48,29 +25,27 @@ def coingecko_metadata_search(
     param: address <string> token contract address
     param: coin_id <dataframe> core.coins.coin_id which is added to bigquery records
     '''
+    # get logger
+    logger = logging.getLogger(__name__)
 
     # making the api call
-    headers = {'x_cg_pro_api_key': coingecko_api_key}
-    url = 'https://api.coingecko.com/api/v3/coins/'+blockchain+'/contract/'+address
-    response = requests.request("GET", url, headers=headers)
+    coingecko_api_key = os.getenv('COINGECKO_API_KEY')
+
+    url = f'https://api.coingecko.com/api/v3/coins/{blockchain}/contract/{address}&x_cg_demo_api_key={coingecko_api_key}'
+    response = requests.get(url, timeout=30)
     response_data = json.loads(response.text)
 
     try:
         coingecko_id = response_data['id']
         search_successful = True
         search_log = 'search successful'
-        print('search successful for '+blockchain+address)
+        logger.info('search successful for <%s:%s>', blockchain, address)
     except:
         coingecko_id = None
         search_successful = False
         search_log = str(response_data)
-        print('FAILURE: search failed for '+blockchain+address)
+        logger.info('FAILUIRE: search failed for <%s:%s>', blockchain, address)
         print(response_data)
-
-    # rate limit pause
-    print('~~~ rate limit pause :) ~~~')
-    time.sleep(15)
-
 
     # storing json in gcs
     if search_successful:
@@ -106,9 +81,18 @@ def coingecko_metadata_search(
 
 
 # clound functions wrapper
-def cloud_function_wrapper(data,context):
+def retrieve_coingecko_metadata(request):
+    '''
+    pulls a list of coins that need metadata and attempts to match them and store metadata
+    '''
+    # configure logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
+        datefmt='%d/%b/%Y %H:%M:%S'
+        )
+    logger = logging.getLogger(__name__)
 
-    print('hello')
     # pull list of coins to attempt
     query_sql = '''
         select cc.coin_id
@@ -121,21 +105,9 @@ def cloud_function_wrapper(data,context):
         where cc.address is not null -- removes coins without addresses
         and cgi.coin_id is null -- removes previously attempted coins (this could be modified to retry some older matches)
         '''
-    ### troubleshooting connection errors 
-    # location='US'
-    # project = 'western-verve-411004'
-    # # Create a BigQuery client object.
-    # client = bigquery.Client(project=project,location=location)
 
-    # query_job = client.query(query_sql)
-    # query_df = query_job.to_dataframe()
-
-    update_queue_df = run_bigquery_sql(query_sql)
+    update_queue_df = dgc().run_sql(query_sql)
     print('coins to update: '+str(update_queue_df.shape[0]))
-
-    # api key pulled from exposed secret
-    coingecko_api_key = os.environ.get('coingecko_api_key')
-    print('api key retrieved.')
 
     # ping api for each coin
     for i in range(len(update_queue_df)):
@@ -144,25 +116,13 @@ def cloud_function_wrapper(data,context):
         coin_id = update_queue_df.iloc[i]['coin_id']
         symbol = update_queue_df.iloc[i]['symbol']
 
-        print('processing '+symbol+'...')
+        logger.info('initiating coingecko metadata search for %s...', symbol)
         coingecko_metadata_search(
-                coingecko_api_key
-                ,blockchain
+                blockchain
                 ,address
                 ,coin_id
             )
 
-
-# cloud functions execution
-# setting these allows both test and production functioning
-try:
-    data
-except: 
-    data = 'test_data'
-try:
-    context
-except: 
-    context = 'test_context'
-
-
-cloud_function_wrapper(data, context)
+        # rate limit pause
+        logger.info('pausing 10 seconds to avoid coingecko api rate limit issues...')
+        time.sleep(10)
