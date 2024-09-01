@@ -84,11 +84,7 @@ def coingecko_metadata_search(blockchain, address, coin_id):
         logger.info('%s uploaded successfully', filename)
 
     # store search result in etl_pipelines.coin_coingecko_ids
-    client = bigquery.Client(
-        project=dgc().project_id,
-        location=dgc().location,
-        credentials=dgc().credentials
-    )
+    client = bigquery.Client(credentials=credentials, project='dreams-labs-data')
     table_id = 'western-verve-411004.etl_pipelines.coin_coingecko_ids'
 
     rows_to_insert = [{
@@ -134,6 +130,7 @@ def retrieve_coingecko_metadata(request):
         where cc.address is not null -- removes coins without addresses
         and cgi.coin_id is null
         group by 1,2,3
+        limit 5
         '''
 
     update_queue_df = dgc().run_sql(query_sql)
