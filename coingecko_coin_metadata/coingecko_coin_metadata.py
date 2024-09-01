@@ -38,7 +38,7 @@ def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
             return response_data
 
     logging.error("Max retries reached. Returning the last response data.")
-    
+
     return response_data
 
 
@@ -121,8 +121,9 @@ def retrieve_coingecko_metadata(request):
         from core.coins cc
         left join core.chains ch on ch.chain_id = cc.chain_id
         left join etl_pipelines.coin_coingecko_ids cgi on cgi.coin_id = cc.coin_id
+            and cgi.search_log = "{'error': 'coin not found'}" -- removes coins that could not be found while reattempting api timeouts
         where cc.address is not null -- removes coins without addresses
-        and cgi.coin_id is null -- removes previously attempted coins (this could be modified to retry some older matches)
+        limit 5
         '''
 
     update_queue_df = dgc().run_sql(query_sql)
