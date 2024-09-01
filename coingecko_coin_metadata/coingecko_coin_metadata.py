@@ -45,7 +45,7 @@ def coingecko_metadata_search(
         search_successful = False
         search_log = str(response_data)
         logger.info('FAILUIRE: search failed for <%s:%s>', blockchain, address)
-        print(response_data)
+        logger.info('%s',str(response_data))
 
     # storing json in gcs
     if search_successful:
@@ -57,7 +57,8 @@ def coingecko_metadata_search(
 
         blob = bucket.blob(filepath + filename)
         blob.upload_from_string(json.dumps(response_data),content_type = 'json')
-        print(filename+' uploaded successfully')
+
+        logger.info('%s uploaded successfully', filename)
 
 
     # store search result in etl_pipelines.coin_coingecko_ids
@@ -74,9 +75,9 @@ def coingecko_metadata_search(
 
     errors = client.insert_rows_json(table_id, rows_to_insert)  # Make an API request.
     if errors == []:
-        print("new row added to etl_pipelines.coin_coingecko_ids")
+        logger.info("new row added to etl_pipelines.coin_coingecko_ids")
     else:
-        print("Encountered errors while inserting rows: {}".format(errors))
+        logger.info("Encountered errors while inserting rows: {}".format(errors))
 
 
 
@@ -107,7 +108,7 @@ def retrieve_coingecko_metadata(request):
         '''
 
     update_queue_df = dgc().run_sql(query_sql)
-    print('coins to update: '+str(update_queue_df.shape[0]))
+    logger.info('coins to update: %s', str(update_queue_df.shape[0]))
 
     # ping api for each coin
     for i in range(len(update_queue_df)):
