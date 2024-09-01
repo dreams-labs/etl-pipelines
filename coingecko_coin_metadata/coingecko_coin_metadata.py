@@ -130,7 +130,6 @@ def retrieve_coingecko_metadata(request):
         where cc.address is not null -- removes coins without addresses
         and cgi.coin_id is null
         group by 1,2,3
-        limit 5
         '''
 
     update_queue_df = dgc().run_sql(query_sql)
