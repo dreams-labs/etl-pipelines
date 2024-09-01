@@ -127,5 +127,5 @@ def retrieve_coingecko_metadata(request):
             )
 
         # rate limit pause
-        logger.info('pausing 10 seconds to avoid coingecko api rate limit issues...')
-        time.sleep(10)
+        logger.info('pausing `15` seconds to avoid coingecko api rate limit issues...')
+        time.sleep(15)
