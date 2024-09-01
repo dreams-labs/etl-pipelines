@@ -32,8 +32,10 @@ def coingecko_metadata_search(
     # making the api call
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
 
-    url = f'https://api.coingecko.com/api/v3/coins/{blockchain}/contract/{address}&x_cg_demo_api_key={coingecko_api_key}'
-    response = requests.get(url, timeout=30)
+    # making the api call
+    headers = {'x_cg_pro_api_key': coingecko_api_key}
+    url = 'https://api.coingecko.com/api/v3/coins/'+blockchain+'/contract/'+address
+    response = requests.request("GET", url, headers=headers)
     response_data = json.loads(response.text)
 
     try:
@@ -99,7 +101,6 @@ def retrieve_coingecko_metadata(request):
     # pull list of coins to attempt
     query_sql = '''
         select cc.coin_id
-        ,cc.symbol
         ,ch.chain_text_coingecko
         ,cc.address
         from core.coins cc
@@ -117,9 +118,8 @@ def retrieve_coingecko_metadata(request):
         blockchain = update_queue_df.iloc[i]['chain_text_coingecko']
         address = update_queue_df.iloc[i]['address']
         coin_id = update_queue_df.iloc[i]['coin_id']
-        symbol = update_queue_df.iloc[i]['symbol']
 
-        logger.info('initiating coingecko metadata search for %s...', symbol)
+        logger.info('initiating coingecko metadata search for <%s:%s>', blockchain, address)
         coingecko_metadata_search(
                 blockchain
                 ,address
