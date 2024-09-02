@@ -15,6 +15,7 @@ from dreams_core.googlecloud import GoogleCloud as dgc
 logger = dc.setup_logger()
 
 
+
 @functions_framework.http
 def update_chains_tables(request):
     '''
@@ -61,7 +62,7 @@ def refresh_chains_tables():
     query_sql = '''
         create or replace table core.chains as (
             select *
-            from etl_pipelines.chains_sheets_import
+            from etl_pipelines.chains_sheet
             order by chain_id
         );
 
