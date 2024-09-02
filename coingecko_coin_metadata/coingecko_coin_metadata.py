@@ -102,7 +102,7 @@ def coingecko_metadata_search(blockchain, address, coin_id):
         logger.info("Encountered errors while inserting rows: {}".format(errors))
 
 
-# clound functions wrapper
+@functions_framework.http
 def retrieve_coingecko_metadata(request):
     '''
     pulls a list of coins that need metadata and attempts to match them and store metadata
