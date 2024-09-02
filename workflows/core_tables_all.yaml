@@ -6,6 +6,15 @@ main:
         - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
         - service_account: western-verve-411004@appspot.gserviceaccount.com
 
+    - refreshCoreChains:
+        # ingest new blockchains and blockchain aliases to be used in coin metadata
+        call: http.get
+        args:
+            url: https://core-chains-954736581165.us-west1.run.app
+            auth:
+                type: OIDC
+            timeout: 300
+
     - refreshCoreCoins:
         # ingest new coins from community calls, whale charts, etc
         call: http.get

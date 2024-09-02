@@ -7,6 +7,7 @@ import logging
 import os
 from pytz import utc
 import pandas as pd
+import numpy as np
 import functions_framework
 import dreams_core.core as dc
 from dreams_core.googlecloud import GoogleCloud as dgc
@@ -37,13 +38,30 @@ def update_chains_tables(request):
 def ingest_chains_sheet():
     '''
     refreshes the etl_pipelines.chains_sheet bigquery table by ingesting the underlying 
-        sheets data
+        sheets data, formatting it, and uploading it to bigquery
     '''
-    # read the core.chains data out of the Dreams Data Schema workbook
+
+    # Step 1: Read core.chains data out of the Dreams Data Schema workbook
+    # -------------------------------------------------------------------- 
     # link: https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135#gid=388901135
     df = dgc().read_google_sheet('11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs','core.chains!A:L')
 
-    # use the df to refresh the etl_pipelines.community_calls table
+
+    # Step 2: Normalize formatting of ingested data
+    # ---------------------------------------------
+    # Convert 'chain_id' to int64
+    df['chain_id'] = df['chain_id'].astype('int64')
+
+    # Convert 'is_case_sensitive' to boolean
+    df['is_case_sensitive'] = df['is_case_sensitive'].apply(lambda x: bool(x) if pd.notnull(x) else None)
+
+    # Replace empty strings and None strings with NaN (which represents NULL in Pandas)
+    df = df.replace('', np.nan).replace('None', np.nan, regex=False)
+    df = df.fillna(value=np.nan)
+
+
+    # Step 3: Upload the normalized data as a bigquery table
+    # ------------------------------------------------------
     dgc().upload_df_to_bigquery(
         df,
         'etl_pipelines',
