@@ -8,11 +8,70 @@ import os
 from pytz import utc
 import pandas as pd
 import functions_framework
+import dreams_core.core as dc
 from dreams_core.googlecloud import GoogleCloud as dgc
 
+# set up logger at the module level
+logger = dc.setup_logger()
 
 
-def intake_new_community_calls():
+@functions_framework.http
+def update_core_coins(request):
+    '''
+    updates core.coins by adding new records from calls and dune, then refreshing the core.coins table. 
+    even if there are no new coins added the table should still be refreshed to make updates to new 
+    data connections, such as new coingecko_ids, market data, etc. 
+    '''
+    # load new community calls into bigquery
+    refresh_community_calls_table()
+
+    # add new coins in the etl_pipelines.community_calls to etl_pipelines.coins_intake
+    intake_new_community_calls_coins()
+    
+    # add new coins with wallet transfer data from the whale chart function
+    intake_new_wallet_transfer_coins()
+
+    # refresh core.coins to add coins or update data completeness (e.g. has_market_data, etc)
+    calls_coins_old,dune_coins_old,other_coins_old = check_coin_counts()
+    refresh_core_coins()
+
+    # summarize changes for logging purposes
+    calls_coins,dune_coins,other_coins = check_coin_counts()
+
+    new_calls = calls_coins - calls_coins_old
+    new_dune = dune_coins - dune_coins_old
+    new_other = other_coins - other_coins_old
+    total_coins = calls_coins + dune_coins + other_coins
+    total_new_coins = new_calls + new_dune + new_other
+
+    logger.info(f"refreshed core.coins to {total_coins} total records.")
+    logger.info(f"{new_calls} new coins added from community calls.")
+    logger.info(f"{new_dune} new coins added from dune wallet transfer data.")
+    logger.info(f"{new_other} new coins added from other sources.")
+
+    return f'{{"finished updating core.coins to {total_coins} records ({total_new_coins} newly added)"}}'
+
+
+
+def refresh_community_calls_table():
+    '''
+    refreshes the etl_pipelines.community_calls bigquery table by uploading the gcs_export tab 
+        in the Community Calls google sheet
+    '''
+    # read the community calls gcs_export tab as a df
+    # link: https://docs.google.com/spreadsheets/d/1X6AJWBJHisADvyqoXwEvTPi1JSNReVU_woNW32Hz_yQ/edit?pli=1&gid=1640621634
+    df = dgc().read_google_sheet('1X6AJWBJHisADvyqoXwEvTPi1JSNReVU_woNW32Hz_yQ','gcs_export!A:H')
+
+    # use the df to refresh the etl_pipelines.community_calls table
+    dgc().upload_df_to_bigquery(
+        df,
+        'etl_pipelines',
+        'community_calls',
+        if_exists='replace'
+    )
+
+
+def intake_new_community_calls_coins():
     '''
     ingests new coins from the etl_pipelines.community_calls table into the 
     etl_pipelines.coins_intake table through the following steps:
@@ -220,47 +279,3 @@ def check_coin_counts():
     other_coins = df['coins'].sum() - calls_coins - dune_coins
 
     return calls_coins,dune_coins,other_coins
-
-
-@functions_framework.http
-def update_core_coins(request):
-    '''
-    updates core.coins by adding new records from calls and dune, then refreshing the core.coins table. 
-    even if there are no new coins added the table should still be refreshed to make updates to new 
-    data connections, such as new coingecko_ids, market data, etc. 
-    '''
-    # configure logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
-        datefmt='%d/%b/%Y %H:%M:%S'
-        )
-    logger = logging.getLogger(__name__)
-
-    # add new community calls to etl_pipelines.coins_intake
-    intake_new_community_calls()
-    
-    # add new coins with wallet transfer data from the whale chart function
-    intake_new_wallet_transfer_coins()
-
-    # refresh core.coins to add coins or update data completeness (e.g. has_market_data, etc)
-    calls_coins_old,dune_coins_old,other_coins_old = check_coin_counts()
-    refresh_core_coins()
-
-    # summarize changes for logging purposes
-    calls_coins,dune_coins,other_coins = check_coin_counts()
-
-    new_calls = calls_coins - calls_coins_old
-    new_dune = dune_coins - dune_coins_old
-    new_other = other_coins - other_coins_old
-    total_coins = calls_coins + dune_coins + other_coins
-    total_new_coins = new_calls + new_dune + new_other
-
-    logger.info(
-        f"refreshed core.coins to {total_coins} total records."
-        f"{new_calls} new coins added from community calls"
-        f"{new_dune} new coins added from dune wallet transfer data"
-        f"{new_other} new coins added from other sources"
-    )
-
-    return f'{{"finished updating core.coins to {total_coins} records ({total_new_coins} newly added)"}}'

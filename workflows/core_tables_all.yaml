@@ -27,6 +27,6 @@ main:
         # pull prices and other market data for all matched coins
         call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
         args:
-            workflow_id: core-coin-facts-coingecko
+            workflow_id: core-coin-market-data
             connector_params:
                 timeout: 3000
