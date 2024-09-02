@@ -8,6 +8,7 @@ import os
 from pytz import utc
 import pandas as pd
 import functions_framework
+from google.cloud import bigquery_storage
 from dreams_core.googlecloud import GoogleCloud as dgc
 
 

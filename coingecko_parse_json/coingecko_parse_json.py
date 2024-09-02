@@ -13,6 +13,53 @@ from google.cloud import storage
 import dreams_core.core as dc
 from dreams_core.googlecloud import GoogleCloud as dgc
 
+# set up logger at the module level
+logger = dc.setup_logger()
+
+
+@functions_framework.http
+def parse_coingecko_json(request):
+    """
+    Main function to parse and process the CoinGecko JSON data.
+
+    This function serves as an HTTP endpoint to trigger the parsing and processing 
+    of CoinGecko data stored in Google Cloud Storage. It identifies unprocessed 
+    JSON files, fetches the data for each coin, and uploads various components 
+    (metadata, categories, and contracts) to corresponding BigQuery tables.
+
+    Workflow:
+    ---------
+    1. Identify Coins to Process:
+       - Calls the `identify_coins_to_process()` function to compare existing JSON 
+         files in Google Cloud Storage with records in the BigQuery table 
+         `etl_pipelines.coin_coingecko_metadata`.
+       - Identifies coins whose data has not yet been uploaded to BigQuery.
+
+    2. Fetch and Process JSON Data:
+       - For each identified coin, the function retrieves the corresponding JSON 
+         data using `fetch_coin_json(coin)`.
+
+    3. Upload Data to BigQuery:
+       - The function processes and uploads the data in three parts:
+         a. Metadata: Using `upload_metadata(json_data)` to extract and upload 
+            general coin information.
+         b. Categories: Using `upload_categories(json_data)` to extract and 
+            upload category information associated with the coin.
+         c. Contracts: Using `upload_contracts(json_data)` to extract and upload 
+            blockchain contract details.
+    """
+    # identify jsons that haven't yet been processed
+    coins_to_process = identify_coins_to_process()
+
+    # extract the json data and upload it to the corresponding bigquery tables
+    for coin in coins_to_process:
+        json_data = fetch_coin_json(coin)
+        upload_metadata(json_data)
+        upload_categories(json_data)
+        upload_contracts(json_data)
+
+    return f"coingecko json parsing complete. processed {len(coins_to_process)} coins."
+
 
 def identify_coins_to_process():
     """
@@ -23,8 +70,6 @@ def identify_coins_to_process():
     return: coins_to_process <array> list of coins with valid json files that have not been \
         added to etl_pipelines.coin_coingecko_metadata
     """
-    dc.setup_logger()
-
     # pull list of all coins with json objects
     client = storage.Client()
     bucket = client.get_bucket('dreams-labs-storage')
@@ -51,25 +96,6 @@ def identify_coins_to_process():
     return coins_to_process
 
 
-
-def parse_coingecko_json(data, context):
-    """
-    Main function to parse and process the coingecko json data.
-    """
-    # Configure logger
-    dc.setup_logger()
-
-    # identify jsons that haven't yet been processed
-    coins_to_process = identify_coins_to_process()
-
-    # extract the json data and upload it to the corresponding bigquery tables
-    for coin in coins_to_process:
-        json_data = fetch_coin_json(coin)
-        upload_metadata(json_data)
-        upload_categories(json_data)
-        upload_contracts(json_data)
-
-
 def fetch_coin_json(coin):
     """
     Retrieves the JSON blob for a coin from Google Cloud Storage.
@@ -79,7 +105,9 @@ def fetch_coin_json(coin):
     file_name = f'data_lake/coingecko_coin_metadata/{coin}.json'
     blob = bucket.blob(file_name)
     blob_contents = blob.download_as_string()
+
     return json.loads(blob_contents)
+
 
 def upload_metadata(json_data):
     """
