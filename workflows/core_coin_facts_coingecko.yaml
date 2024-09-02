@@ -1,0 +1,24 @@
+# Workflow to retrieve market data from CoinGecko and update core coin market data 
+# via HTTP GET requests, with OIDC authentication.
+main:
+    steps:
+    - init:
+        assign:
+        - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+        - service_account: western-verve-411004@appspot.gserviceaccount.com
+    - retrieveCoingeckoMarketData:
+        call: http.get
+        args:
+            url: https://coingecko-market-data-https-fatui3rd2a-uw.a.run.app
+            auth:
+                type: OIDC
+            timeout: 1800
+    - updateCoreCoinMarketData:
+        call: http.get
+        args:
+            url: https://core-coin-market-data-fatui3rd2a-uw.a.run.app
+            auth:
+                type: OIDC
+        result: resp
+    - returnOutput:
+            return: '${resp}'

@@ -1,5 +1,5 @@
 '''
-cloud function that runs a query to refresh the data in bigquery table core.coin_market_data
+cloud function that runs a query to refresh the data in bigquery table core.coins
 '''
 import datetime
 import time
