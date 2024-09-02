@@ -1,0 +1,32 @@
+# Workflow to refresh all core tables
+main:
+    steps:
+    - init:
+        assign:
+        - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+        - service_account: western-verve-411004@appspot.gserviceaccount.com
+
+    - refreshCoreCoins:
+        # ingest new coins from community calls, whale charts, etc
+        call: http.get
+        args:
+            url: https://core-coins-fatui3rd2a-uw.a.run.app
+            auth:
+                type: OIDC
+            timeout: 300
+
+    - retrieveCoingeckoMetadata:
+        # attempt to match new coins to coingecko and retrieve their metadata
+        call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
+        args:
+            workflow_id: core-coin-facts-coingecko
+            connector_params:
+                timeout: 1800
+
+    - retrieveCoingeckoMarketData:
+        # pull prices and other market data for all matched coins
+        call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
+        args:
+            workflow_id: core-coin-facts-coingecko
+            connector_params:
+                timeout: 3000
