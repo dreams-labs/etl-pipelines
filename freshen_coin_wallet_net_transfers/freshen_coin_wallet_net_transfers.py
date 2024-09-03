@@ -13,13 +13,33 @@ from dune_client.query import QueryBase
 import pandas_gbq
 import functions_framework
 from dreams_core.googlecloud import GoogleCloud as dgc
+from dreams_core import core as dc
 
-logging.basicConfig(
-    level=logging.ERROR,
-    format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
-    datefmt='%d/%b/%Y %H:%M:%S'
-    )
-logger = logging.getLogger(__name__)
+# set up logger at the module level
+logger = dc.setup_logger()
+
+
+@functions_framework.cloud_event
+def freshen_coin_wallet_net_transfers():
+    '''
+    runs all functions in sequence to complete all update steps
+    '''
+    logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
+
+    # update the dune table that tracks how fresh the data is
+    freshness_df = update_dune_freshness_table()
+
+    # generate the sql query needed to refresh the transfers table
+    update_chains = freshness_df['chain'].unique()
+    full_query = generate_net_transfers_update_query(update_chains)
+
+    # retrieve the fresh dune data using the generated query
+    transfers_df = get_fresh_dune_data(full_query)
+
+    # upload the fresh dune data to bigquery
+    append_to_bigquery_table(freshness_df,transfers_df)
+
+
 
 def update_dune_freshness_table():
     '''
@@ -397,23 +417,3 @@ def append_to_bigquery_table(freshness_df,transfers_df):
 #         ],
 #         is_private=False
 #     )
-
-@functions_framework.cloud_event
-def freshen_coin_wallet_net_transfers():
-    '''
-    runs all functions in sequence to complete all update steps
-    '''
-    logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
-
-    # update the dune table that tracks how fresh the data is
-    freshness_df = update_dune_freshness_table()
-
-    # generate the sql query needed to refresh the transfers table
-    update_chains = freshness_df['chain'].unique()
-    full_query = generate_net_transfers_update_query(update_chains)
-
-    # retrieve the fresh dune data using the generated query
-    transfers_df = get_fresh_dune_data(full_query)
-
-    # upload the fresh dune data to bigquery
-    append_to_bigquery_table(freshness_df,transfers_df)

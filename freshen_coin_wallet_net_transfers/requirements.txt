@@ -2,5 +2,5 @@ functions-framework==3.*
 pandas==1.5.3
 dune_client==1.7.2
 pandas-gbq==0.22.0
-dreams_core==0.0.7
+dreams_core==0.2.17
 db-dtypes==1.2.0
