@@ -184,7 +184,8 @@ def generate_net_transfers_update_query(dune_chains):
                 ) as transfers_json
             from daily_net_transfers
             where amount <> 0 -- excludes wallet days with equal to/from transactions that net to 0
-        )'''
+        )
+        '''
 
     # all erc20 tokens have identical table structures so this query can be repeated for each
     def erc20_query(chain_text_dune):
