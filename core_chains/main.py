@@ -53,7 +53,7 @@ def ingest_chains_sheet():
     df['chain_id'] = df['chain_id'].astype('int64')
 
     # Convert 'is_case_sensitive' to boolean
-    df['is_case_sensitive'].replace('FALSE',False).replace('TRUE',True).replace('',np.nan)
+    df['is_case_sensitive'] = df['is_case_sensitive'].replace('FALSE',False).replace('TRUE',True).replace('',np.nan).astype(pd.BooleanDtype())
 
     # Replace empty strings and None strings with NaN (which represents NULL in Pandas)
     df = df.replace('', np.nan).replace('None', np.nan, regex=False)
