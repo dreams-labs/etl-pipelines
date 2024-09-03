@@ -26,7 +26,7 @@ def get_transfers_for_new_coins(request):
     """
 
     """
-    # identify 
+    # identify records in core.coins that do not have any etl_pipelines.coin_wallet_net_transfers
 
     return f"coingecko json parsing complete. processed {len(coins_to_process)} coins."
 
