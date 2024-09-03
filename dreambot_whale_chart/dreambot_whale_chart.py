@@ -158,6 +158,7 @@ def lookup_chain_ids(
         ,ch.chain_text_dune
         ,ch.chain_text_coingecko
         ,ch.chain_text_geckoterminal
+        ,ch.is_case_sensitive
         from reference.chain_nicknames cn
         left join core.chains ch on ch.chain_id = cn.chain_id
         '''
@@ -187,13 +188,14 @@ def lookup_chain_ids(
             match_outcome = 'success'
             chain_text_coingecko = chain_nicknames[chain_nicknames['chain_reference'] == input_chain]['chain_text_coingecko'].values[0]
             chain_text_geckoterminal = chain_nicknames[chain_nicknames['chain_reference'] == input_chain]['chain_text_geckoterminal'].values[0]
+            chain_case_sensitive = chain_nicknames[chain_nicknames['chain_reference'] == input_chain]['is_case_sensitive'].values[0]
             if verbose:
                 print("chain '"+input_chain+"' valid for dune query...")
 
     except:
         match_outcome = 'invalid chain'
 
-    return(chain_id,chain_text_dune,chain_text_coingecko,chain_text_geckoterminal,match_outcome)
+    return(chain_id,chain_text_dune,chain_text_coingecko,chain_text_geckoterminal,chain_case_sensitive,match_outcome)
 
 
 def coingecko_metadata_search(
@@ -859,7 +861,7 @@ def whales_chart_wrapper(
 
     ### INPUT VALIDITY CHECKS ###
     # check if blockchain alias is valid
-    chain_id,chain_text_dune,chain_text_coingecko,chain_text_geckoterminal,match_outcome = lookup_chain_ids(blockchain_name,verbose=verbose)
+    chain_id,chain_text_dune,chain_text_coingecko,chain_text_geckoterminal,chain_case_sensitive,match_outcome = lookup_chain_ids(blockchain_name,verbose=verbose)
     if match_outcome != 'success':
         # API CODE 400: errors from blockchain alias match
         api_response_code = 400
@@ -880,6 +882,9 @@ def whales_chart_wrapper(
         discord_message = 'Days of history must be between 2 and 2000. (input value: '+str(days_of_history)+')'
         return(api_response_code,function_result_summary,function_result_detail,discord_message,dune_execution_time,dune_total_time)
 
+    # set the contract address to be lowercase if the chain is not case sensitive:
+    if chain_case_sensitive==False:
+        contract_address = contract_address.lower()
 
     # # TODO: threshold validation logic needs to incorporate whale_threshold_tokens
     # # check if whale_threshold_usd is valid
