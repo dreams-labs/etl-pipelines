@@ -339,6 +339,12 @@ def append_to_bigquery_table(freshness_df,transfers_df):
         none
     '''
 
+    # Check if transfers_df is empty and terminate upload process if so
+    if transfers_df.empty:
+        logger.warning('No new wallet transfer data to upload to BigQuery as transfers_df is empty.')
+        return
+
+
     # map decimals data from bigquery onto the retrieved dune data
     freshness_df.rename(columns={'token_address':'contract_address'},inplace=True)
     transfers_df = pd.merge(
