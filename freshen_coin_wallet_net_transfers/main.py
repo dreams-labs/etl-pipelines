@@ -19,7 +19,7 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 
-@functions_framework.cloud_event
+@functions_framework.http
 def freshen_coin_wallet_net_transfers():
     '''
     runs all functions in sequence to complete all update steps
