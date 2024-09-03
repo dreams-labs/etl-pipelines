@@ -171,19 +171,19 @@ def generate_net_transfers_update_query(dune_chains):
                 ,address
                 ,contract_address
                 ,sum(amount) as amount
-                ,sum(abs(amount)) as gross_amount
                 from transfers  
                 group by 1,2,3,4
             )
             
-            select date
-            ,chain
-            ,contract_address
-            ,address as wallet_address
-            ,amount as daily_net_transfers
+            select json_object(
+                'date': date
+                ,'chain': chain
+                ,'contract_address': contract_address
+                ,'wallet_address': address
+                ,'daily_net_transfers': amount
+                ) as transfers_json
             from daily_net_transfers
             where amount <> 0 -- excludes wallet days with equal to/from transactions that net to 0
-            order by contract_address,address,date
         )'''
 
     # all erc20 tokens have identical table structures so this query can be repeated for each
@@ -253,19 +253,19 @@ def generate_net_transfers_update_query(dune_chains):
                 ,address
                 ,contract_address
                 ,sum(amount) as amount
-                ,sum(abs(amount)) as gross_amount
                 from transfers  
                 group by 1,2,3,4
             )
-            
-            select date
-            ,chain
-            ,contract_address
-            ,address as wallet_address
-            ,amount as daily_net_transfers
+
+            select json_object(
+                'date': date
+                ,'chain': chain
+                ,'contract_address': contract_address
+                ,'wallet_address': address
+                ,'daily_net_transfers': amount
+                ) as transfers_json
             from daily_net_transfers
             where amount <> 0 -- excludes wallet days with equal to/from transactions that net to 0
-            order by contract_address,address,date
         )
         '''
 
