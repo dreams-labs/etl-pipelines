@@ -7,19 +7,40 @@ provides updated whale chart data by following this sequence:
 import datetime
 import os
 import logging
+import json
 import pandas as pd
 from dune_client.client import DuneClient
 from dune_client.query import QueryBase
 import pandas_gbq
 import functions_framework
 from dreams_core.googlecloud import GoogleCloud as dgc
+from dreams_core import core as dc
 
-logging.basicConfig(
-    level=logging.ERROR,
-    format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
-    datefmt='%d/%b/%Y %H:%M:%S'
-    )
-logger = logging.getLogger(__name__)
+# set up logger at the module level
+logger = dc.setup_logger()
+
+
+@functions_framework.http
+def freshen_coin_wallet_net_transfers(request):
+    '''
+    runs all functions in sequence to complete all update steps
+    '''
+    logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
+
+    # update the dune table that tracks how fresh the data is
+    freshness_df = update_dune_freshness_table()
+
+    # generate the sql query needed to refresh the transfers table
+    update_chains = freshness_df['chain'].unique()
+    full_query = generate_net_transfers_update_query(update_chains)
+
+    # retrieve the fresh dune data using the generated query
+    transfers_df = get_fresh_dune_data(full_query)
+
+    # upload the fresh dune data to bigquery
+    append_to_bigquery_table(freshness_df,transfers_df)
+
+
 
 def update_dune_freshness_table():
     '''
@@ -82,89 +103,184 @@ def generate_net_transfers_update_query(dune_chains):
         full_query <str>: the long dune query that will return all wallet-coin-days needed to update 
     '''
 
+    # query to retrieve solana transfers (solana tables have a different structure than erc20 chains)
     sol_query = '''
-    with solana as (
-        --  retrieving the most recent bigquery records available in dune
-        with current_net_transfers_freshness as (
-            with last_updated as (
-                select max(updated_at) as updated_at
+        with solana as (
+            --  retrieving the most recent bigquery records available in dune
+            with current_net_transfers_freshness as (
+                with last_updated as (
+                    select max(updated_at) as updated_at
+                    from dune.dreamslabs.etl_net_transfers_freshness ts
+                )
+                select ts.*
                 from dune.dreamslabs.etl_net_transfers_freshness ts
-            )
-            select ts.*
-            from dune.dreamslabs.etl_net_transfers_freshness ts
-            join last_updated on last_updated.updated_at = ts.updated_at
-        ),
-        
-        -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
-        transfers_filtered as (
-            -- find the earliest possible date that we need data for
-            with most_out_of_date as (
-                select min(cast(ts.freshest_date as date)) as date
-                from current_net_transfers_freshness ts
-                where ts.chain = 'solana'
-            )
-            select 'solana' as chain
-            ,t.block_time
-            ,t.from_token_account
-            ,t.to_token_account
-            ,t.token_mint_address
-            ,t.amount
-            from tokens_solana.transfers t
-            -- remove all rows earlier than the earliest possible relevant date
-            where date_trunc('day', t.block_time at time zone 'UTC') > (select date from most_out_of_date)
-            -- remove rows from today since the daily net totals aren't finalized
-            and date_trunc('day', t.block_time at time zone 'UTC') < 
-                date(current_timestamp at time zone 'UTC')
-        ),
-        transfers as (
-            select t.chain
-            ,date_trunc('day', t.block_time at time zone 'UTC') as date
-            ,t.from_token_account as address
-            ,-cast(t.amount as double) as amount
-            ,token_mint_address as contract_address
-            from transfers_filtered t
-            join current_net_transfers_freshness ts
-                on ts.token_address = t.token_mint_address
-                and ts.chain = t.chain
-                and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
+                join last_updated on last_updated.updated_at = ts.updated_at
+            ),
             
-            union all
+            -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
+            transfers_filtered as (
+                -- find the earliest possible date that we need data for
+                with most_out_of_date as (
+                    select min(cast(ts.freshest_date as date)) as date
+                    from current_net_transfers_freshness ts
+                    where ts.chain = 'solana'
+                )
+                select 'solana' as chain
+                ,t.block_time
+                ,t.from_token_account
+                ,t.to_token_account
+                ,t.token_mint_address
+                ,t.amount
+                from tokens_solana.transfers t
+                -- remove all rows earlier than the earliest possible relevant date
+                where date_trunc('day', t.block_time at time zone 'UTC') > (select date from most_out_of_date)
+                -- remove rows from today since the daily net totals aren't finalized
+                and date_trunc('day', t.block_time at time zone 'UTC') < 
+                    date(current_timestamp at time zone 'UTC')
+            ),
+            transfers as (
+                select t.chain
+                ,date_trunc('day', t.block_time at time zone 'UTC') as date
+                ,t.from_token_account as address
+                ,-cast(t.amount as double) as amount
+                ,token_mint_address as contract_address
+                from transfers_filtered t
+                join current_net_transfers_freshness ts
+                    on ts.token_address = t.token_mint_address
+                    and ts.chain = t.chain
+                    and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
+                
+                union all
+                
+                select t.chain
+                ,date_trunc('day', t.block_time at time zone 'UTC') as date
+                ,t.to_token_account as address
+                ,cast(t.amount as double) as amount
+                ,token_mint_address as contract_address
+                from transfers_filtered t
+                join current_net_transfers_freshness ts
+                    on ts.token_address = t.token_mint_address
+                    and ts.chain = t.chain
+                    and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
+            ),
+            daily_net_transfers as (
+                select chain
+                ,date
+                ,address
+                ,contract_address
+                ,sum(amount) as amount
+                ,sum(abs(amount)) as gross_amount
+                from transfers  
+                group by 1,2,3,4
+            )
             
-            select t.chain
-            ,date_trunc('day', t.block_time at time zone 'UTC') as date
-            ,t.to_token_account as address
-            ,cast(t.amount as double) as amount
-            ,token_mint_address as contract_address
-            from transfers_filtered t
-            join current_net_transfers_freshness ts
-                on ts.token_address = t.token_mint_address
-                and ts.chain = t.chain
-                and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
-        ),
-        daily_net_transfers as (
-            select chain
-            ,date
-            ,address
+            select date
+            ,chain
             ,contract_address
-            ,sum(amount) as amount
-            ,sum(abs(amount)) as gross_amount
-            from transfers  
-            group by 1,2,3,4
-        )
-        
-        select date
-        ,chain
-        ,contract_address
-        ,address as wallet_address
-        ,amount as daily_net_transfers
-        from daily_net_transfers
-        where amount <> 0 -- excludes wallet days with equal to/from transactions that net to 0
-        order by contract_address,address,date
-    )'''
+            ,address as wallet_address
+            ,amount as daily_net_transfers
+            from daily_net_transfers
+            where amount <> 0 -- excludes wallet days with equal to/from transactions that net to 0
+            order by contract_address,address,date
+        )'''
 
+    # all erc20 tokens have identical table structures so this query can be repeated for each
     def erc20_query(chain_text_dune):
         return f'''
-    ,{chain_text_dune} as (
+        ,{chain_text_dune} as (
+            --  retrieving the most recent bigquery records available in dune
+            with current_net_transfers_freshness as (
+                with last_updated as (
+                    select max(updated_at) as updated_at
+                    from dune.dreamslabs.etl_net_transfers_freshness ts
+                )
+                select ts.*
+                from dune.dreamslabs.etl_net_transfers_freshness ts
+                join last_updated on last_updated.updated_at = ts.updated_at
+            ),
+            
+            -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
+            transfers_filtered as (
+                -- find the earliest possible date that we need data for
+                with most_out_of_date as (
+                    select min(cast(ts.freshest_date as date)) as date
+                    from current_net_transfers_freshness ts
+                    where ts.chain = '{chain_text_dune}'
+                )
+                select '{chain_text_dune}' as chain
+                ,t.evt_block_time as block_time
+                ,cast(t."from" as varchar) as from_token_account
+                ,cast(t."to" as varchar) as to_token_account
+                ,cast(t.contract_address as varchar) as token_mint_address
+                ,t.value as amount
+                from erc20_{chain_text_dune}.evt_Transfer t
+                -- remove all rows earlier than the earliest possible relevant date
+                where date_trunc('day', t.evt_block_time at time zone 'UTC') > (select date from most_out_of_date)
+                -- remove rows from today since the daily net totals aren't finalized
+                and date_trunc('day', t.evt_block_time at time zone 'UTC') < 
+                    date(current_timestamp at time zone 'UTC')
+            ),
+            transfers as (
+                select t.chain
+                ,date_trunc('day', t.block_time at time zone 'UTC') as date
+                ,t.from_token_account as address
+                ,-cast(t.amount as double) as amount
+                ,token_mint_address as contract_address
+                from transfers_filtered t
+                join current_net_transfers_freshness ts
+                    on ts.token_address = t.token_mint_address
+                    and ts.chain = t.chain
+                    and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
+                
+                union all
+                
+                select t.chain
+                ,date_trunc('day', t.block_time at time zone 'UTC') as date
+                ,t.to_token_account as address
+                ,cast(t.amount as double) as amount
+                ,token_mint_address as contract_address
+                from transfers_filtered t
+                join current_net_transfers_freshness ts
+                    on ts.token_address = t.token_mint_address
+                    and ts.chain = t.chain
+                    and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
+            ),
+            daily_net_transfers as (
+                select chain
+                ,date
+                ,address
+                ,contract_address
+                ,sum(amount) as amount
+                ,sum(abs(amount)) as gross_amount
+                from transfers  
+                group by 1,2,3,4
+            )
+            
+            select date
+            ,chain
+            ,contract_address
+            ,address as wallet_address
+            ,amount as daily_net_transfers
+            from daily_net_transfers
+            where amount <> 0 -- excludes wallet days with equal to/from transactions that net to 0
+            order by contract_address,address,date
+        )
+        '''
+
+    query_ctes = sol_query
+    query_selects = 'select * from solana'
+
+    for chain_text_dune in dune_chains:
+        if chain_text_dune=='solana':
+            continue
+        query_ctes = ''.join([query_ctes,erc20_query(chain_text_dune)])
+        query_selects = '\nunion all\n'.join([query_selects,f'select * from {chain_text_dune}'])
+
+    full_query = query_ctes+query_selects
+    logger.info('generated full query.')
+
+    # ABBREVIATED QUERY FOR TESTING PURPOSES ONLY
+    full_query = """
         --  retrieving the most recent bigquery records available in dune
         with current_net_transfers_freshness as (
             with last_updated as (
@@ -175,22 +291,22 @@ def generate_net_transfers_update_query(dune_chains):
             from dune.dreamslabs.etl_net_transfers_freshness ts
             join last_updated on last_updated.updated_at = ts.updated_at
         ),
-        
+
         -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
         transfers_filtered as (
             -- find the earliest possible date that we need data for
             with most_out_of_date as (
                 select min(cast(ts.freshest_date as date)) as date
                 from current_net_transfers_freshness ts
-                where ts.chain = '{chain_text_dune}'
+                where ts.chain = 'optimism'
             )
-            select '{chain_text_dune}' as chain
+            select 'optimism' as chain
             ,t.evt_block_time as block_time
             ,cast(t."from" as varchar) as from_token_account
             ,cast(t."to" as varchar) as to_token_account
             ,cast(t.contract_address as varchar) as token_mint_address
             ,t.value as amount
-            from erc20_{chain_text_dune}.evt_Transfer t
+            from erc20_optimism.evt_Transfer t
             -- remove all rows earlier than the earliest possible relevant date
             where date_trunc('day', t.evt_block_time at time zone 'UTC') > (select date from most_out_of_date)
             -- remove rows from today since the daily net totals aren't finalized
@@ -232,29 +348,17 @@ def generate_net_transfers_update_query(dune_chains):
             from transfers  
             group by 1,2,3,4
         )
-        
-        select date
-        ,chain
-        ,contract_address
-        ,address as wallet_address
-        ,amount as daily_net_transfers
+
+        select json_object(
+            'date': date
+            ,'chain': chain
+            ,'contract_address': contract_address
+            ,'wallet_address': address
+            ,'daily_net_transfers': amount
+            ) as transfers_json
         from daily_net_transfers
         where amount <> 0 -- excludes wallet days with equal to/from transactions that net to 0
-        order by contract_address,address,date
-    )
-    '''
-
-    query_ctes = sol_query
-    query_selects = 'select * from solana'
-
-    for chain_text_dune in dune_chains:
-        if chain_text_dune=='solana':
-            continue
-        query_ctes = ''.join([query_ctes,erc20_query(chain_text_dune)])
-        query_selects = '\nunion all\n'.join([query_selects,f'select * from {chain_text_dune}'])
-
-    full_query = query_ctes+query_selects
-    logger.info('generated full query.')
+        """
 
     return full_query
 
@@ -285,8 +389,12 @@ def get_fresh_dune_data(full_query):
     )
     # run dune query and load to a dataframe
     logger.info('fetching fresh dune data...')
-    transfers_df = dune.run_query_dataframe(transfers_query, ping_frequency=10)
-    logger.info('fetched fresh dune data with %s rows.', len(transfers_df))
+    transfers_json_df = dune.run_query_dataframe(transfers_query, ping_frequency=10)
+    logger.info('fetched fresh dune data with %s rows.', len(transfers_json_df))
+
+    # expand the json data into df columns
+    json_data = [json.loads(record) for record in transfers_json_df['transfers_json']]
+    transfers_df = pd.DataFrame(json_data)
 
     return transfers_df
 
@@ -397,23 +505,3 @@ def append_to_bigquery_table(freshness_df,transfers_df):
 #         ],
 #         is_private=False
 #     )
-
-@functions_framework.cloud_event
-def freshen_coin_wallet_net_transfers():
-    '''
-    runs all functions in sequence to complete all update steps
-    '''
-    logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
-
-    # update the dune table that tracks how fresh the data is
-    freshness_df = update_dune_freshness_table()
-
-    # generate the sql query needed to refresh the transfers table
-    update_chains = freshness_df['chain'].unique()
-    full_query = generate_net_transfers_update_query(update_chains)
-
-    # retrieve the fresh dune data using the generated query
-    transfers_df = get_fresh_dune_data(full_query)
-
-    # upload the fresh dune data to bigquery
-    append_to_bigquery_table(freshness_df,transfers_df)
