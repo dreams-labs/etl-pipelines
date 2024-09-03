@@ -40,6 +40,8 @@ def freshen_coin_wallet_net_transfers(request):
     # upload the fresh dune data to bigquery
     append_to_bigquery_table(freshness_df,transfers_df)
 
+    return "finished refreshing etl_pipelines.coin_wallet_net_transfers."
+
 
 
 def update_dune_freshness_table():
