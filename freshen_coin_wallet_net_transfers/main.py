@@ -108,15 +108,18 @@ def generate_net_transfers_update_query(dune_chains):
     # query to retrieve solana transfers (solana tables have a different structure than erc20 chains)
     sol_query = '''
         with solana as (
-            --  retrieving the most recent bigquery records available in dune
+            --  retrieving the most recent batch of bigquery records available in dune
             with current_net_transfers_freshness as (
-                with last_updated as (
-                    select max(updated_at) as updated_at
-                    from dune.dreamslabs.etl_net_transfers_freshness ts
+                select chain
+                ,token_address
+                ,freshest_date
+                ,updated_at
+                from (
+                    select *
+                    ,rank() over (order by updated_at desc) as batch_recency
+                    from dune.dreamslabs.etl_net_transfers_freshness t
                 )
-                select ts.*
-                from dune.dreamslabs.etl_net_transfers_freshness ts
-                join last_updated on last_updated.updated_at = ts.updated_at
+                where batch_recency = 1
             ),
             
             -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
@@ -191,15 +194,18 @@ def generate_net_transfers_update_query(dune_chains):
     def erc20_query(chain_text_dune):
         return f'''
         ,{chain_text_dune} as (
-            --  retrieving the most recent bigquery records available in dune
+            --  retrieving the most recent batch of bigquery records available in dune
             with current_net_transfers_freshness as (
-                with last_updated as (
-                    select max(updated_at) as updated_at
-                    from dune.dreamslabs.etl_net_transfers_freshness ts
+                select chain
+                ,token_address
+                ,freshest_date
+                ,updated_at
+                from (
+                    select *
+                    ,rank() over (order by updated_at desc) as batch_recency
+                    from dune.dreamslabs.etl_net_transfers_freshness t
                 )
-                select ts.*
-                from dune.dreamslabs.etl_net_transfers_freshness ts
-                join last_updated on last_updated.updated_at = ts.updated_at
+                where batch_recency = 1
             ),
             
             -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
