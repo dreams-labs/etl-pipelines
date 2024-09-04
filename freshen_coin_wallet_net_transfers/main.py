@@ -79,7 +79,7 @@ def update_dune_freshness_table():
             where ch.chain_text_dune is not null -- only include dune-supported blockchains
             and e.token_address is null -- only include coins without existing transfer data
             and c.decimals is not null -- currently decimals are required to run the dune queries but this could be refactored
-            limit 43
+            limit 25
         )
         select chain
         ,token_address
