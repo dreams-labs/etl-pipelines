@@ -69,7 +69,8 @@ def update_coin_wallet_metrics(request):
     # upload metrics to bigquery
     upload_coin_metrics_data(all_coin_metrics_df)
 
-    return 'finished refreshing core.coin_wallet_metrics. '
+    return 'finished refreshing core.coin_wallet_metrics.'
+
 
 
 def prepare_datasets():
@@ -253,6 +254,7 @@ def calculate_buyer_counts(balances_df):
     logger.debug('New vs repeat buyer counts complete after %.2f seconds', time.time() - start_time)
 
     return buyers_df
+
 
 
 def calculate_daily_gini(balances_df):
