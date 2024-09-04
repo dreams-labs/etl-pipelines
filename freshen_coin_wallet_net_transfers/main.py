@@ -49,20 +49,48 @@ def update_dune_freshness_table():
     updates the dune table etl_net_transfers_freshness with the current state of the bigquery table 
     etl_pipelines.coin_wallet_net_transfers.
 
+    the number of new records from core.coins that will be added to etl_pipelines.coin_wallet_net_transfers
+    is determined by the limit in the `new_records` CTE. 
+
     params: None
     returns:
         update_chains <array>: an array of all blockchains that need freshness updates
     '''
     # retrieve freshness df
     query_sql = '''
-        select chain_text_source as chain
+        with existing_records as (
+            select chain_text_source as chain
+            ,token_address
+            ,decimals
+            ,max(date) as freshest_date
+            from etl_pipelines.coin_wallet_net_transfers
+            where data_source = 'dune'
+            group by 1,2,3
+        )
+        ,new_records as (
+            select ch.chain_text_dune as chain
+            ,c.address as token_address
+            ,c.decimals
+            ,cast('2000-01-01' as datetime) as freshest_date
+            from core.coins c
+            join core.chains ch on ch.chain_id = c.chain_id
+            left join existing_records e on e.token_address = c.address
+                and e.chain = ch.chain_text_dune
+            where ch.chain_text_dune is not null -- only include dune-supported blockchains
+            and e.token_address is null -- only include coins without existing transfer data
+            and c.decimals is not null -- currently decimals are required to run the dune queries but this could be refactored
+            limit 25
+        )
+        select chain
         ,token_address
         ,decimals
-        ,max(date) as freshest_date
+        ,freshest_date
         ,current_timestamp() as updated_at
-        from etl_pipelines.coin_wallet_net_transfers
-        where data_source = 'dune'
-        group by 1,2,3
+        from (
+            select * from existing_records
+            -- union all
+            -- select * from new_records
+        )
     '''
     freshness_df = dgc().run_sql(query_sql)
     logger.info('retrieved freshness data for %s tokens', freshness_df.shape[0])
@@ -327,6 +355,7 @@ def get_fresh_dune_data(full_query):
     # expand the json data into df columns
     json_data = [json.loads(record) for record in transfers_json_df['transfers_json']]
     transfers_df = pd.DataFrame(json_data)
+    logger.info('completed translation from dune export json to dataframe.')
 
     return transfers_df
 
