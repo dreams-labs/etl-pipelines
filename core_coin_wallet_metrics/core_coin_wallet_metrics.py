@@ -366,9 +366,9 @@ def calculate_gini_without_mega_whales(balances_df, total_supply):
     - gini_filtered_df (dataframe): df of gini coefficient without mega whales
     '''
     # filter out addresses that have ever owned 5% or more supply
-    mega_whales = balances_df[balances_df['balance']>=(total_supply*0.05)]['wallet_address'].unique()
-    balances_df_filtered = balances_df[~balances_df['wallet_address'].isin(mega_whales)]
-
+    mega_whales = balances_df.loc[balances_df['balance'] >= (total_supply * 0.05), 'wallet_address'].unique()
+    balances_df_filtered = balances_df[~balances_df['wallet_address'].isin(set(mega_whales))]
+    
     # calculate gini
     gini_filtered_df = calculate_daily_gini(balances_df_filtered)
     gini_filtered_df.rename(columns={'gini_coefficient': 'gini_coefficient_excl_mega_whales'}, inplace=True)
