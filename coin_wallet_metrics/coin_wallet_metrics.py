@@ -9,25 +9,67 @@ from datetime import datetime
 from pytz import utc
 import pandas as pd
 import numpy as np
-from dreams_core.googlecloud import GoogleCloud as dgc
 import functions_framework
 import pandas_gbq
+from dreams_core.googlecloud import GoogleCloud as dgc
+import dreams_core.core as dc
+
+# set up logger at the module level
+logger = dc.setup_logger()
 
 
-def configure_logger():
+@functions_framework.http
+def update_coin_wallet_metrics(request):
     '''
-    retrieves an existing logger if one exists, otherwise creates a new silent logger object
+    HTTP-triggered Cloud Function that calculates and uploads metrics related to the 
+    distribution of coin ownership across wallets for all tracked coins.
 
-    returns:
-    - logger (logging object): a logger object that either retains existing logging settings or \
-        creates a new silent logger
+    Steps:
+    1. Retrieves required datasets from BigQuery:
+       - Coin metadata (e.g., total supply, chain ID, token address)
+       - Daily wallet balances and transaction details for each coin.
+    2. For each coin, calculates several metrics:
+       - Wallet ownership distribution: Classifies wallets into bins based on percentage of total coin supply held.
+       - New vs. repeat buyers: Counts first-time and repeat buyers for each day.
+       - Gini coefficient: Measures wealth inequality among wallets.
+       - Gini coefficient excluding "mega whales": Filters out wallets holding more than 5% of total supply to refine inequality analysis.
+    3. Aggregates metrics for all coins into a single DataFrame.
+    4. Uploads the results to the BigQuery table `core.coin_wallet_metrics`.
+
+    Parameters:
+    - request (flask.Request): The HTTP request object. This is automatically passed when the function 
+      is triggered via an HTTP request, but is unused within the function.
+
+    Returns:
+    - str: A success message once the process is complete and the metrics have been uploaded.
+
+    Raises:
+    - May raise errors related to data retrieval, computation, or BigQuery upload if any step fails.
     '''
-    logger = logging.getLogger(__name__)
-    if not logger.handlers:
-        handler = logging.NullHandler()
-        logger.addHandler(handler)
+    # retrieve full sets of metadata and daily wallet balances
+    all_metadata_df,all_balances_df = prepare_datasets()
 
-    return logger
+    # prepare list and df for loop iteration
+    unique_coin_ids = all_balances_df['coin_id'].unique().tolist()
+    all_coin_metrics_df = pd.DataFrame()
+
+    # generate metrics for all coins
+    for c in unique_coin_ids:
+        # retrieve coin-specific dfs
+        metadata_df = all_metadata_df[all_metadata_df['coin_id']==c].copy()
+        balances_df = all_balances_df[all_balances_df['coin_id']==c].copy()
+
+        # calculate and merge metrics
+        coin_metrics_df = calculate_coin_metrics(metadata_df,balances_df)
+
+        # fill zeros for missing dates (currently impacts buyer behavior and gini columns)
+        all_coin_metrics_df.fillna(0, inplace=True)
+        all_coin_metrics_df = pd.concat([all_coin_metrics_df,coin_metrics_df])
+
+    # upload metrics to bigquery
+    upload_coin_metrics_data(all_coin_metrics_df)
+
+    return 'finished refreshing core.coin_wallet_metrics. '
 
 
 def prepare_datasets():
@@ -39,7 +81,6 @@ def prepare_datasets():
     - all_balances_df (df): includes the daily wallet data necessary to calculate relevant metrics
 
     '''
-    logger = configure_logger()
     start_time = time.time()
     logger.debug('Retrieving datasets required for wallet balance metrics...')
 
@@ -147,7 +188,6 @@ def calculate_wallet_counts(balances_df,total_supply):
     returns:
     - wallets_df (dataframe): df of wallet counts based on percent of total supply
     '''
-    logger = configure_logger()
     start_time = time.time()
 
     # Calculate total supply and generate wallet bins
@@ -193,7 +233,6 @@ def calculate_buyer_counts(balances_df):
     returns:
     - buyers_df (dataframe): df of the number of new and repeat buyers on each date
     '''
-    logger = configure_logger()
     start_time = time.time()
 
     # Ensure 'date' column is of datetime type
@@ -227,7 +266,6 @@ def calculate_daily_gini(balances_df):
     returns:
     - gini_df (dataframe): df with dates as the index and the Gini coefficients as the values.
     '''
-    logger = configure_logger()
     start_time = time.time()
 
     # Get the most recent balance for each wallet each day
@@ -293,7 +331,6 @@ def calculate_coin_metrics(metadata_df,balances_df):
     Returns:
     - coin_metrics_df (dataframe): Contains the calculated metrics and metadata for the specified coin.
     '''
-    logger = configure_logger()
     logger.info('Calculating metrics for %s', metadata_df['symbol'].iloc[0])
     total_supply = metadata_df['total_supply'].iloc[0]
     coin_id = metadata_df['coin_id'].iloc[0]
@@ -351,8 +388,6 @@ def upload_coin_metrics_data(all_coin_metrics_df):
     Returns:
         None
     '''
-    logger = logging.getLogger(__name__)
-
     # Add metadata to upload_df
     upload_df = all_coin_metrics_df.copy()
     upload_df['updated_at'] = datetime.now(utc)
@@ -432,40 +467,3 @@ def upload_coin_metrics_data(all_coin_metrics_df):
         progress_bar=False
     )
     logger.info('Replaced data in %s.', table_name)
-
-
-
-@functions_framework.cloud_event
-def update_coin_wallet_metrics():
-    '''
-    runs all functions in sequence to update and upload core.coin_wallet_metrics
-    '''
-    # configure logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
-        datefmt='%d/%b/%Y %H:%M:%S'
-        )
-
-    # retrieve full sets of metadata and daily wallet balances
-    all_metadata_df,all_balances_df = prepare_datasets()
-
-    # prepare list and df for loop iteration
-    unique_coin_ids = all_balances_df['coin_id'].unique().tolist()
-    all_coin_metrics_df = pd.DataFrame()
-
-    # generate metrics for all coins
-    for c in unique_coin_ids:
-        # retrieve coin-specific dfs
-        metadata_df = all_metadata_df[all_metadata_df['coin_id']==c].copy()
-        balances_df = all_balances_df[all_balances_df['coin_id']==c].copy()
-
-        # calculate and merge metrics
-        coin_metrics_df = calculate_coin_metrics(metadata_df,balances_df)
-
-        # fill zeros for missing dates (currently impacts buyer behavior and gini columns)
-        all_coin_metrics_df.fillna(0, inplace=True)
-        all_coin_metrics_df = pd.concat([all_coin_metrics_df,coin_metrics_df])
-
-    # upload metrics to bigquery
-    upload_coin_metrics_data(all_coin_metrics_df)
