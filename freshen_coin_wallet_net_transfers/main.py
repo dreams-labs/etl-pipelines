@@ -49,6 +49,9 @@ def update_dune_freshness_table():
     updates the dune table etl_net_transfers_freshness with the current state of the bigquery table 
     etl_pipelines.coin_wallet_net_transfers.
 
+    the number of new records from core.coins that will be added to etl_pipelines.coin_wallet_net_transfers
+    is determined by the limit in the `new_records` CTE. 
+
     params: None
     returns:
         update_chains <array>: an array of all blockchains that need freshness updates
@@ -76,7 +79,7 @@ def update_dune_freshness_table():
             where ch.chain_text_dune is not null -- only include dune-supported blockchains
             and e.token_address is null -- only include coins without existing transfer data
             and c.decimals is not null -- currently decimals are required to run the dune queries but this could be refactored
-            limit 10
+            limit 25
         )
         select chain
         ,token_address
