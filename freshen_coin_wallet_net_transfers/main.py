@@ -317,7 +317,11 @@ def get_fresh_dune_data(full_query):
     )
     # run dune query and load to a dataframe
     logger.info('fetching fresh dune data...')
-    transfers_json_df = dune.run_query_dataframe(transfers_query, ping_frequency=10)
+    transfers_json_df = dune.run_query_dataframe(
+        transfers_query,
+        performance='large',
+        ping_frequency=10
+        )
     logger.info('fetched fresh dune data with %s rows.', len(transfers_json_df))
 
     # expand the json data into df columns
