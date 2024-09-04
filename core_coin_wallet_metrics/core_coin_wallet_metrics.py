@@ -55,9 +55,9 @@ def update_coin_wallet_metrics(request):
 
     # generate metrics for all coins
     for c in unique_coin_ids:
-        # retrieve coin-specific dfs
-        metadata_df = all_metadata_df[all_metadata_df['coin_id']==c].copy()
-        balances_df = all_balances_df[all_balances_df['coin_id']==c].copy()
+        metadata_df = all_metadata_df.loc[all_metadata_df['coin_id'] == c]
+        # balances_df data will be altered so it needs .copy()
+        balances_df = all_balances_df.loc[all_balances_df['coin_id'] == c].copy()
 
         # calculate and merge metrics
         coin_metrics_df = calculate_coin_metrics(metadata_df,balances_df)
