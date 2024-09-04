@@ -333,7 +333,7 @@ def calculate_daily_gini(balances_df):
     def efficient_gini(arr):
         arr = np.sort(arr)
         n = len(arr)
-        if n == 0:
+        if (n * np.sum(arr)) == 0:
             return None
         index = np.arange(1, n + 1)
         return (2 * np.sum(index * arr) - (n + 1) * np.sum(arr)) / (n * np.sum(arr))
