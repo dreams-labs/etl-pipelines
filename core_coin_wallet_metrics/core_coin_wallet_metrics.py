@@ -117,6 +117,61 @@ def prepare_datasets():
 
 
 
+def calculate_coin_metrics(metadata_df,balances_df):
+    '''
+    Calculate various metrics for a specific cryptocurrency coin and merge them into a single df.
+
+    Parameters:
+    - all_balances_df (dataframe): Contains balance information on all dates for all coins.
+    - all_metadata_df (dataframe): Contains containing metadata for all coins.
+    - coin_id (str): The coin ID to calculate metrics for.
+
+    Returns:
+    - coin_metrics_df (dataframe): Contains the calculated metrics and metadata for the specified coin.
+    '''
+    logger.info('Calculating metrics for %s', metadata_df['symbol'].iloc[0])
+    total_supply = metadata_df['total_supply'].iloc[0]
+    coin_id = metadata_df['coin_id'].iloc[0]
+
+    # Calculate Metrics
+    # -----------------
+
+    # Metric 1: Wallets by Ownership
+    # Shows what whale wallets and small wallets are doing
+    wallets_by_ownership_df = calculate_wallet_counts(balances_df, total_supply)
+
+    # Metric 2: Buyers New vs Repeat
+    # Shows how many daily buyers are first-time vs repeat buyers
+    buyers_new_vs_repeat_df = calculate_buyer_counts(balances_df)
+
+    # Metric 3: Gini Coefficients
+    # Gini coefficients based on wallet balances
+    gini_df = calculate_daily_gini(balances_df)
+    gini_df_excl_mega_whales = calculate_gini_without_mega_whales(balances_df, total_supply)
+
+
+    # Merge All Metrics into One DataFrame
+    # ------------------------------------
+    metrics_dfs = [
+        wallets_by_ownership_df,
+        buyers_new_vs_repeat_df,
+        gini_df,
+        gini_df_excl_mega_whales
+    ]
+    coin_metrics_df = metrics_dfs[0]
+    for df in metrics_dfs[1:]:
+        coin_metrics_df = coin_metrics_df.join(df, how='outer')
+
+    # reset index
+    coin_metrics_df = coin_metrics_df.reset_index().rename(columns={'index': 'date'})
+
+    # add coin_id
+    coin_metrics_df['coin_id'] = coin_id
+
+    return coin_metrics_df
+
+
+
 def generate_wallet_bins(total_supply):
     '''
     defines bins for wallet balances based on what percent of total supply they own
@@ -319,61 +374,6 @@ def calculate_gini_without_mega_whales(balances_df, total_supply):
     gini_filtered_df.rename(columns={'gini_coefficient': 'gini_coefficient_excl_mega_whales'}, inplace=True)
 
     return gini_filtered_df
-
-
-
-def calculate_coin_metrics(metadata_df,balances_df):
-    '''
-    Calculate various metrics for a specific cryptocurrency coin and merge them into a single df.
-
-    Parameters:
-    - all_balances_df (dataframe): Contains balance information on all dates for all coins.
-    - all_metadata_df (dataframe): Contains containing metadata for all coins.
-    - coin_id (str): The coin ID to calculate metrics for.
-
-    Returns:
-    - coin_metrics_df (dataframe): Contains the calculated metrics and metadata for the specified coin.
-    '''
-    logger.info('Calculating metrics for %s', metadata_df['symbol'].iloc[0])
-    total_supply = metadata_df['total_supply'].iloc[0]
-    coin_id = metadata_df['coin_id'].iloc[0]
-
-    # Calculate Metrics
-    # -----------------
-
-    # Metric 1: Wallets by Ownership
-    # Shows what whale wallets and small wallets are doing
-    wallets_by_ownership_df = calculate_wallet_counts(balances_df, total_supply)
-
-    # Metric 2: Buyers New vs Repeat
-    # Shows how many daily buyers are first-time vs repeat buyers
-    buyers_new_vs_repeat_df = calculate_buyer_counts(balances_df)
-
-    # Metric 3: Gini Coefficients
-    # Gini coefficients based on wallet balances
-    gini_df = calculate_daily_gini(balances_df)
-    gini_df_excl_mega_whales = calculate_gini_without_mega_whales(balances_df, total_supply)
-
-
-    # Merge All Metrics into One DataFrame
-    # ------------------------------------
-    metrics_dfs = [
-        wallets_by_ownership_df,
-        buyers_new_vs_repeat_df,
-        gini_df,
-        gini_df_excl_mega_whales
-    ]
-    coin_metrics_df = metrics_dfs[0]
-    for df in metrics_dfs[1:]:
-        coin_metrics_df = coin_metrics_df.join(df, how='outer')
-
-    # reset index
-    coin_metrics_df = coin_metrics_df.reset_index().rename(columns={'index': 'date'})
-
-    # add coin_id
-    coin_metrics_df['coin_id'] = coin_id
-
-    return coin_metrics_df
 
 
 
