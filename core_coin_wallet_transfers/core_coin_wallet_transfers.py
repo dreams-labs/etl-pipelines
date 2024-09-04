@@ -43,6 +43,7 @@ def rebuild_core_coin_wallet_transfers():
             join core.chains ch on ch.chain_id = c.chain_id
             join etl_pipelines.coin_wallet_net_transfers wnt on wnt.token_address = c.address 
                 and (wnt.chain_text_source = ch.chain_text_dune and wnt.data_source = 'dune')
+            where wnt.wallet_address <> 'None' -- removes the non-existent counterparty from burn/mint transactions
         );
 
         select 'core.coin_wallet_transfers' as table
