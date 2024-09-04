@@ -16,6 +16,24 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 
+@functions_framework.http
+def update_core_coin_wallet_transfers(request):
+    '''
+    runs all functions in sequence to refresh core.coin_market_data
+    '''
+    # insert new coingecko market data records to core.coin_market_data
+    logger.info(f'rebuilding table core.coin_wallet_transfers...')
+    counts_df = rebuild_core_coin_wallet_transfers()
+
+    # log job summary
+    core_count = counts_df[counts_df['table']=='core.coin_wallet_transfers']['records'].iloc[0]
+    etl_count = counts_df[counts_df['table']=='etl_pipelines.coin_wallet_net_transfers']['records'].iloc[0]
+    logger.info('rebuilt core.coin_wallet_transfers [%s rows] from etl_pipelines.coin_wallet_net_transfers [%s rows].',core_count,etl_count)
+
+    return f'{{"rebuild of core.coin_wallet_transfers complete."}}'
+
+
+
 def rebuild_core_coin_wallet_transfers():
     '''
     adds new records in etl_pipelines.coin_market_data_coingecko to core.coin_market_data after 
@@ -61,20 +79,3 @@ def rebuild_core_coin_wallet_transfers():
     counts_df = dgc().run_sql(query_sql)
 
     return counts_df
-
-
-@functions_framework.http
-def update_core_coin_wallet_transfers(request):
-    '''
-    runs all functions in sequence to refresh core.coin_market_data
-    '''
-    # insert new coingecko market data records to core.coin_market_data
-    logger.info(f'rebuilding table core.coin_wallet_transfers...')
-    counts_df = rebuild_core_coin_wallet_transfers()
-
-    # log job summary
-    core_count = counts_df[counts_df['table']=='core.coin_wallet_transfers']['records'].iloc[0]
-    etl_count = counts_df[counts_df['table']=='etl_pipelines.coin_wallet_net_transfers']['records'].iloc[0]
-    logger.info('rebuilt core.coin_wallet_transfers [%s rows] from etl_pipelines.coin_wallet_net_transfers [%s rows].',core_count,etl_count)
-
-    return f'{{"rebuild of core.coin_wallet_transfers complete."}}'
