@@ -79,7 +79,7 @@ def update_dune_freshness_table():
             where ch.chain_text_dune is not null -- only include dune-supported blockchains
             and e.token_address is null -- only include coins without existing transfer data
             and c.decimals is not null -- currently decimals are required to run the dune queries but this could be refactored
-            limit 25
+            limit 43
         )
         select chain
         ,token_address
@@ -88,8 +88,8 @@ def update_dune_freshness_table():
         ,current_timestamp() as updated_at
         from (
             select * from existing_records
-            union all
-            select * from new_records
+            -- union all
+            -- select * from new_records
         )
     '''
     freshness_df = dgc().run_sql(query_sql)
@@ -355,6 +355,7 @@ def get_fresh_dune_data(full_query):
     # expand the json data into df columns
     json_data = [json.loads(record) for record in transfers_json_df['transfers_json']]
     transfers_df = pd.DataFrame(json_data)
+    logger.info('completed translation from dune export json to dataframe.')
 
     return transfers_df
 
