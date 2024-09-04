@@ -50,7 +50,7 @@ def update_coin_wallet_metrics(request):
     all_metadata_df,all_balances_df = prepare_datasets()
 
     # prepare list and df for loop iteration
-    unique_coin_ids = all_balances_df['coin_id'].unique().tolist()
+    unique_coin_ids = all_balances_df['coin_id'].drop_duplicates().tolist()
     all_coin_metrics_df = pd.DataFrame()
 
     # generate metrics for all coins
@@ -75,7 +75,8 @@ def update_coin_wallet_metrics(request):
 
 def prepare_datasets():
     '''
-    retrieves the dfs necessary for wallet metric calculation
+    runs two bigquery queries to retrieve the dfs necessary for wallet metric calculation. 
+    note that the all_balanaces_df is very large as it contains all transfer-days for all coins. 
 
     returns:
     - metadata_df (df): includes metadata about each coin such as total supply
