@@ -16,7 +16,7 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 
-def rebuiild_core_coin_wallet_transfers():
+def rebuild_core_coin_wallet_transfers():
     '''
     adds new records in etl_pipelines.coin_market_data_coingecko to core.coin_market_data after 
     normalizing and filling relevant fields
@@ -69,7 +69,7 @@ def update_core_coin_wallet_transfers(request):
     '''
     # insert new coingecko market data records to core.coin_market_data
     logger.info(f'rebuilding table core.coin_wallet_transfers...')
-    counts_df = rebuiild_core_coin_wallet_transfers()
+    counts_df = rebuild_core_coin_wallet_transfers()
 
     # log job summary
     core_count = counts_df[counts_df['table']=='core.coin_wallet_transfers']['records'].iloc[0]
