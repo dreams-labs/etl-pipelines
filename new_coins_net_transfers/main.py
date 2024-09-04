@@ -27,6 +27,7 @@ def get_transfers_for_new_coins(request):
 
     """
     # identify records in core.coins that do not have any etl_pipelines.coin_wallet_net_transfers
+    
 
     return f"coingecko json parsing complete. processed {len(coins_to_process)} coins."
 
@@ -64,6 +65,10 @@ def dune_get_token_transfers(
     # run dune query and load to a dataframe
     logger = logging.getLogger('dune_client')
     logger.setLevel(logging.ERROR)
-    transfers_df = dune.run_query_dataframe(transfers_query, ping_frequency=5)
+    transfers_df = dune.run_query_dataframe(
+        transfers_query,
+        performance='large',
+        ping_frequency=5
+        )
 
     return transfers_df
