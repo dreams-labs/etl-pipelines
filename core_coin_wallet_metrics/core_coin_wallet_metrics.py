@@ -172,6 +172,50 @@ def calculate_coin_metrics(metadata_df,balances_df):
 
 
 
+def calculate_wallet_counts(balances_df,total_supply):
+    '''
+    Consolidates wallet transactions into a daily count of wallets that control a certain \
+        percentage of total supply
+
+    params:
+    - balances_df (dataframe): df showing daily wallet balances of a coin_id token that \
+        has been filtered to only include one coin_id. 
+    - total_supply (float): the total supply of the coin
+
+    returns:
+    - wallets_df (dataframe): df of wallet counts based on percent of total supply
+    '''
+    start_time = time.time()
+
+    # Calculate total supply and generate wallet bins
+    wallet_bins, wallet_labels = generate_wallet_bins(total_supply)
+
+    logger.debug('Calculating daily balances for each wallet...')
+    start_time = time.time()
+
+    # Forward fill balances to ensure each date has the latest balance for each wallet
+    balances_df = balances_df.sort_values(by=['wallet_address', 'date'])
+    balances_df['balance'] = balances_df.groupby('wallet_address')['balance'].ffill()
+
+    # Classify each balance into ownership percentage bins
+    balances_df['wallet_types'] = pd.cut(balances_df['balance'], bins=wallet_bins, labels=wallet_labels)
+
+    # Group by date and wallet type, then count the number of occurrences
+    wallets_df = balances_df.groupby(['date', 'wallet_types'], observed=False).size().unstack(fill_value=0)
+
+    # Add rows for dates with 0 transactions
+    date_range = pd.date_range(start=wallets_df.index.min(), end=wallets_df.index.max(), freq='D')
+    wallets_df = wallets_df.reindex(date_range, fill_value=0)
+
+    # Fill empty cells with 0s
+    wallets_df.fillna(0, inplace=True)
+
+    logger.debug('Daily balance calculations complete after %.2f seconds', time.time() - start_time)
+
+    return wallets_df
+
+
+
 def generate_wallet_bins(total_supply):
     '''
     defines bins for wallet balances based on what percent of total supply they own
@@ -229,50 +273,6 @@ def generate_wallet_bins(total_supply):
     ]
 
     return wallet_bins, wallet_labels
-
-
-
-def calculate_wallet_counts(balances_df,total_supply):
-    '''
-    Consolidates wallet transactions into a daily count of wallets that control a certain \
-        percentage of total supply
-
-    params:
-    - balances_df (dataframe): df showing daily wallet balances of a coin_id token that \
-        has been filtered to only include one coin_id. 
-    - total_supply (float): the total supply of the coin
-
-    returns:
-    - wallets_df (dataframe): df of wallet counts based on percent of total supply
-    '''
-    start_time = time.time()
-
-    # Calculate total supply and generate wallet bins
-    wallet_bins, wallet_labels = generate_wallet_bins(total_supply)
-
-    logger.debug('Calculating daily balances for each wallet...')
-    start_time = time.time()
-
-    # Forward fill balances to ensure each date has the latest balance for each wallet
-    balances_df = balances_df.sort_values(by=['wallet_address', 'date'])
-    balances_df['balance'] = balances_df.groupby('wallet_address')['balance'].ffill()
-
-    # Classify each balance into ownership percentage bins
-    balances_df['wallet_types'] = pd.cut(balances_df['balance'], bins=wallet_bins, labels=wallet_labels)
-
-    # Group by date and wallet type, then count the number of occurrences
-    wallets_df = balances_df.groupby(['date', 'wallet_types'], observed=False).size().unstack(fill_value=0)
-
-    # Add rows for dates with 0 transactions
-    date_range = pd.date_range(start=wallets_df.index.min(), end=wallets_df.index.max(), freq='D')
-    wallets_df = wallets_df.reindex(date_range, fill_value=0)
-
-    # Fill empty cells with 0s
-    wallets_df.fillna(0, inplace=True)
-
-    logger.debug('Daily balance calculations complete after %.2f seconds', time.time() - start_time)
-
-    return wallets_df
 
 
 
