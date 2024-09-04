@@ -1,0 +1,28 @@
+# Workflow to refresh Dune transfers data then update the relevant core tables:
+#     - core.coin_wallet_transfers
+#     - core.coin_wallet_metrics
+main:
+    steps:
+    - init:
+        assign:
+        - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+        - service_account: western-verve-411004@appspot.gserviceaccount.com
+    - updateCoinWalletNetTransfers:
+    # refresh etl_pipelines.coin_wallet_net_transfers
+    # note that this step may take a long time due to the complexity of the dune query
+        call: http.get
+        args:
+            url: https://freshen-coin-wallet-net-transfers-https-954736581165.us-west1.run.app
+            auth:
+                type: OIDC
+            timeout: 3000
+    - updateCoreCoinWalletTransfers:
+    # use updated transfers data to refresh core.coin_wallet_transfers
+        call: http.get
+        args:
+            url: https://core-coin-wallet-transfers-954736581165.us-west1.run.app
+            auth:
+                type: OIDC
+        result: resp
+    - returnOutput:
+            return: '${resp}'
