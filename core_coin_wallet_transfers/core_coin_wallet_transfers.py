@@ -61,8 +61,12 @@ def rebuild_core_coin_wallet_transfers():
             join core.chains ch on ch.chain_id = c.chain_id
             join etl_pipelines.coin_wallet_net_transfers wnt on wnt.token_address = c.address 
                 and (wnt.chain_text_source = ch.chain_text_dune and wnt.data_source = 'dune')
+
+            -- remove dune's various representations of burn/mint addresses
             where wnt.wallet_address <> 'None' -- removes burn/mint address for solana
-            and wnt.wallet_address <> '0x0000000000000000000000000000000000000000' -- removes burn/mint address
+            and wnt.wallet_address <> '0x0000000000000000000000000000000000000000' -- removes burn/mint addresses
+            and wnt.wallet_address <> wnt.token_address 
+            and wnt.wallet_address <> '<nil>'
         );
 
         select 'core.coin_wallet_transfers' as table
