@@ -12,6 +12,70 @@ import requests
 import pandas_gbq
 import functions_framework
 from dreams_core.googlecloud import GoogleCloud as dgc
+from dreams_core import core as dc
+
+# set up logger at the module level
+logger = dc.setup_logger()
+
+
+@functions_framework.http
+def update_coin_market_data_coingecko(request):
+    '''
+    runs all functions in sequence to update and upload the coingecko market data to 
+    etl_pipelines.update_coin_market_data_coingecko. 
+
+    key steps:
+        1. retrieve a df showing the coins that are stale enough to need updates
+        2. for each coin in need of updates, ping the coingecko api and format any
+            new records, then upload them to bigquery. 
+    '''
+    # 1. retrieve list of coins with a coingecko_id that need market data updates
+    updates_df = retrieve_updates_df()
+    logger.info('retrieved bigquery for %s records with stale coingecko market data...', str(updates_df.shape[0]))
+
+    # 2. retrieve market data for each coin in need of updates
+
+    all_market_data = []
+    for i in range(updates_df.shape[0]):
+        try:
+            # coingecko free api limit is 30 calls per minute so pause 2 seconds. 
+            # also prevents the cloud function from creating too many instances. 
+            if i > 0:
+                time.sleep(2)
+            
+            # store iteration-specific variables
+            coingecko_id = updates_df['coingecko_id'][i]
+            coin_id = updates_df['coin_id'][i]
+            most_recent_record = updates_df['most_recent_record'][i]
+
+            # retrieve coingecko market data
+            logger.info('retreiving coingecko data for %s...', coingecko_id)
+            market_df,api_status_code = retrieve_coingecko_market_data(coingecko_id)
+
+            if api_status_code == 200:
+                if not market_df.empty:
+                    logger.info('successfully retrieved %s records for %s.', str(market_df.shape[0]), coingecko_id)
+
+                    # format and filter market data to prepare for upload
+                    market_df = format_and_add_columns(market_df, coingecko_id, coin_id, most_recent_record)
+                    all_market_data.append(market_df)
+
+                else:
+                    logger.info('no new records found for %s.', coingecko_id)
+
+        except Exception as e:
+            logger.error('an error occurred for coingecko_id %s: %s.', coingecko_id, e)
+            continue
+
+    # Combine all data into a single DataFrame and upload it at once
+    if all_market_data:
+        combined_market_df = pd.concat(all_market_data, ignore_index=True)
+        logger.info('uploading combined market data...')
+        upload_market_data(combined_market_df)
+
+    logger.info('update_coin_market_data_coingecko() completed successfully.')
+
+    return f'{{"status":"200"}}'
 
 
 
@@ -41,13 +105,50 @@ def retrieve_updates_df():
         from coingecko_data_status cds
         where (
             cds.most_recent_record is null
-            or cds.most_recent_record < (current_date('UTC') - 1)
+            or cds.most_recent_record < (current_date('UTC') - 2)
             )
         '''
 
     updates_df = dgc().run_sql(query_sql)
 
     return updates_df
+
+
+
+def retrieve_coingecko_market_data(coingecko_id):
+    '''
+    attempts to retrieve data from the coingecko api including error handling for various \
+        coingecko api status codes
+
+    params:
+        coingecko_id (string): coingecko id of coin
+
+    returns:
+        market_df (dataframe): raw api response of market data
+        api_status_code (int): status code of coingecko api call
+    '''
+    logger = logging.getLogger(__name__)
+    logger.addHandler(logging.NullHandler())
+    retry_attempts = 3
+
+    for attempt in range(retry_attempts):
+        market_df,api_status_code = ping_coingecko_api(coingecko_id)
+        if api_status_code == 200:
+            break
+        elif api_status_code == 404:
+            break
+        elif api_status_code == 429:
+            logger.info('coingecko api call timed out, retrying after a 60 second pause...')
+            time.sleep(60)
+            continue
+        else:
+            logger.error('unexpected coingecko api status code %s for %s, continuing to next coin.',
+                str(api_status_code), coingecko_id)
+            break
+    logger.info('coingecko api call for %s completed with status code %s.',
+        coingecko_id, str(api_status_code))
+
+    return market_df, api_status_code
 
 
 
@@ -192,42 +293,6 @@ def ping_coingecko_api(coingecko_id):
     return df,r.status_code
 
 
-def retrieve_coingecko_market_data(coingecko_id):
-    '''
-    attempts to retrieve data from the coingecko api including error handling for various \
-        coingecko api status codes
-
-    params:
-        coingecko_id (string): coingecko id of coin
-
-    returns:
-        market_df (dataframe): raw api response of market data
-        api_status_code (int): status code of coingecko api call
-    '''
-    logger = logging.getLogger(__name__)
-    logger.addHandler(logging.NullHandler())
-    retry_attempts = 3
-
-    for attempt in range(retry_attempts):
-        market_df,api_status_code = ping_coingecko_api(coingecko_id)
-        if api_status_code == 200:
-            break
-        elif api_status_code == 404:
-            break
-        elif api_status_code == 429:
-            logger.info('coingecko api call timed out, retrying after a 60 second pause...')
-            time.sleep(60)
-            continue
-        else:
-            logger.error('unexpected coingecko api status code %s for %s, continuing to next coin.',
-                str(api_status_code), coingecko_id)
-            break
-    logger.info('coingecko api call for %s completed with status code %s.',
-        coingecko_id, str(api_status_code))
-
-    return market_df, api_status_code
-
-
 
 def upload_market_data(market_df):
     '''
@@ -296,116 +361,3 @@ def upload_market_data(market_df):
         ,api_method='load_csv'
     )
     logger.info('appended upload df to %s.', table_name)
-
-
-
-def push_updates_to_bigquery():
-    '''
-    runs a sql query that inserts newly added rows in etl_pipelines.coin_market_data_coingecko \
-        into core.coin_market_data
-    '''
-    query_sql = '''
-    insert into core.coin_market_data (
-
-        select md.date
-        ,co.coin_id
-        ,co.chain_id
-        ,co.address
-        ,md.price
-
-        -- use fdv if market cap data isn't available
-        ,case 
-            when md.market_cap > 0 then md.market_cap
-            else cast(md.price*cgf.total_supply as int64)
-            end as market_cap
-
-        -- calculate fdv using total supply
-        ,cast(md.price*cgf.total_supply as int64) as fdv
-
-        -- calculate circulating supply using market cap
-        ,case
-            when md.market_cap > 0 then cast(md.market_cap/md.price as int64)
-            else cast(cgf.total_supply as int64)
-            end as circulating_supply
-
-        -- total supply retrieved from coingecko metadata tables
-        ,cast(cgf.total_supply as int64) as total_supply
-
-        ,md.volume
-        ,'coingecko' as data_source
-        ,md.updated_at
-        from core.coins co
-        join core.coin_facts_coingecko cgf on cgf.coin_id = co.coin_id
-        join etl_pipelines.coin_market_data_coingecko md on md.coin_id = co.coin_id
-
-        -- don't insert rows that already have data
-        left join core.coin_market_data cmd on cmd.coin_id = md.coin_id and cmd.date = md.date
-        where cmd.date is null
-
-    )
-    '''
-
-    dgc().run_sql(query_sql)
-
-
-
-@functions_framework.http
-def update_coingecko_market_data(request):
-    '''
-    runs all functions in sequence to update and upload coingecko market data
-    '''
-    # configure logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
-        datefmt='%d/%b/%Y %H:%M:%S'
-        )
-    logger = logging.getLogger(__name__)
-
-    # retrieve list of coins with a coingecko_id that need market data updates
-    updates_df = retrieve_updates_df()
-
-    # retrieve market data for each coin in need of updates
-    for i in range(updates_df.shape[0]):
-        try:
-
-            # pause to avoid rate limit issues caused by cloud function repeating loop too quickly
-            # which seems to create too many instances
-            if i > 0:
-                time.sleep(3)
-            
-            # store iteration-specific variables
-            coingecko_id = updates_df['coingecko_id'][i]
-            coin_id = updates_df['coin_id'][i]
-            most_recent_record = updates_df['most_recent_record'][i]
-
-            # retrieve coingecko market data
-            logger.info('retreiving coingecko data for %s...', coingecko_id)
-            market_df,api_status_code = retrieve_coingecko_market_data(coingecko_id)
-
-            if api_status_code == 200:
-                # format and filter market data to prepare for upload
-                logger.info('formatting market data for %s...', coingecko_id)
-                market_df = format_and_add_columns(market_df, coingecko_id, coin_id, most_recent_record)
-
-                # skip to next coin if there's no new records available
-                if market_df.empty:
-                    logger.info('no new records found for %s, continuing to next coin.', coingecko_id)
-                    continue
-
-                # upload market data to bigquery
-                logger.info('uploading market data for %s...', coingecko_id)
-                upload_market_data(market_df)
-                continue
-
-        except Exception as e:
-            logger.error('an error occurred for coingecko_id %s: %s. continuing to next coin.', coingecko_id, e)
-            continue
-
-    # add the new records to core.coin_market_data
-    logger.info('pushing new coingecko market data records to core.coin_market_data...')
-    push_updates_to_bigquery()
-
-    logger.info('update_coingecko_market_data() completed successfully.')
-
-    return f'{{"status":"200"}}'

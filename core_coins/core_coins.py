@@ -22,22 +22,30 @@ def update_core_coins(request):
     even if there are no new coins added the table should still be refreshed to make updates to new 
     data connections, such as new coingecko_ids, market data, etc. 
     '''
-    # load new community calls into bigquery
-    refresh_community_calls_table()
+    # Get query parameter to control whether to intake new coins or to just rebuild core.coins
+    intake_new_coins = request.args.get('intake_new_coins', 'true').lower()
 
-    # add new coins in the etl_pipelines.community_calls to etl_pipelines.coins_intake
-    intake_new_community_calls_coins()
+    # intake new coins if instructed to do so
+    if intake_new_coins == 'true':
+        logger.info(f"ingesting new coins to etl_pipelines.coin_intake...")
+
+        # load new community calls into bigquery
+        refresh_community_calls_table()
+
+        # add new coins in the etl_pipelines.community_calls to etl_pipelines.coins_intake
+        intake_new_community_calls_coins()
     
-    # add new coins with wallet transfer data from the whale chart function
-    intake_new_wallet_transfer_coins()
+        # add new coins with wallet transfer data from the whale chart function
+        intake_new_wallet_transfer_coins()
 
-    # refresh core.coins to add coins or update data completeness (e.g. has_market_data, etc)
+    
+    # refresh core.coins, logging the number of coins before and after the refresh
+    logger.info(f"rebuilding core.coins table...")
     calls_coins_old,dune_coins_old,other_coins_old = check_coin_counts()
     refresh_core_coins()
-
-    # summarize changes for logging purposes
     calls_coins,dune_coins,other_coins = check_coin_counts()
 
+    # summarize changes for logging purposes
     new_calls = calls_coins - calls_coins_old
     new_dune = dune_coins - dune_coins_old
     new_other = other_coins - other_coins_old
@@ -101,6 +109,7 @@ def intake_new_community_calls_coins():
             left join `reference.chain_nicknames` chn on lower(chn.chain_reference) = lower(c.blockchain)
             left join core.chains ch on ch.chain_id = chn.chain_id
             where c.address is not null
+            and c.address <> '#n/a'
         ),
 
         data_checks as (
@@ -224,8 +233,8 @@ def refresh_core_coins():
 
     query_sql = '''
         truncate table core.coins;
-        insert into core.coins (
 
+        insert into core.coins (
             select ci.coin_id
             ,ci.chain
             ,ci.chain_id
@@ -252,12 +261,14 @@ def refresh_core_coins():
                 from core.coin_wallet_transfers 
                 group by 1
             ) cwt on cwt.coin_id = ci.coin_id
-
+            where has_valid_chain = True   
         )
-
         '''
 
-    dgc().run_sql(query_sql)
+    df = dgc().run_sql(query_sql)
+
+    return df
+
 
 
 def check_coin_counts():
