@@ -38,8 +38,8 @@ def update_coin_market_data_coingecko(request):
     all_market_data = []
     for i in range(updates_df.shape[0]):
         try:
-            # pause to avoid rate limit issues caused by cloud function repeating loop too quickly
-            # which seems to create too many instances. coingecko free api limit is 30 calls per minute. 
+            # coingecko free api limit is 30 calls per minute so pause 2 seconds. 
+            # also prevents the cloud function from creating too many instances. 
             if i > 0:
                 time.sleep(2)
             
@@ -58,12 +58,13 @@ def update_coin_market_data_coingecko(request):
                 market_df = format_and_add_columns(market_df, coingecko_id, coin_id, most_recent_record)
 
                 if not market_df.empty:
+                    logger.info('successfully retrieved %s records for %s.', str(market_df.shape[0]), coingecko_id)
                     all_market_data.append(market_df)
                 else:
-                    logger.info('no new records found for %s, continuing to next coin.', coingecko_id)
+                    logger.info('no new records found for %s.', coingecko_id)
 
         except Exception as e:
-            logger.error('an error occurred for coingecko_id %s: %s. continuing to next coin.', coingecko_id, e)
+            logger.error('an error occurred for coingecko_id %s: %s.', coingecko_id, e)
             continue
 
     # Combine all data into a single DataFrame and upload it at once
