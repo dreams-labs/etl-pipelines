@@ -47,14 +47,14 @@ def update_coin_wallet_metrics(request):
     # retrieve full sets of metadata and daily wallet balances
     all_metadata_df,all_balances_df = prepare_datasets()
 
-    # convert string column to categorical to reduce memory usage
-    all_balances_df['coin_id'] = all_balances_df['coin_id'].astype('category')
+    # filter unique_coin_ids to include only those that have corresponding metadata
+    metadata_coin_ids = all_metadata_df['coin_id'].unique().tolist()
+    balances_coin_ids = all_balances_df['coin_id'].drop_duplicates().tolist()
+    unique_coin_ids = [c for c in balances_coin_ids if c in metadata_coin_ids]
 
-
-    # prepare list and df for loop iteration
-    unique_coin_ids = all_balances_df['coin_id'].drop_duplicates().tolist()
     coin_metrics_df_list = []
 
+    logger.debug('Successfully retrieved coin_metrics_df.')
     # generate metrics for all coins
     for c in unique_coin_ids:
         # retrieve coin-specific dfs; balances_df will be altered so it needs the slower .copy()
@@ -102,6 +102,15 @@ def prepare_datasets():
     logger.debug('Retrieving datasets required for wallet balance metrics...')
 
     # sql queries
+    balances_sql = '''
+        select wt.coin_id
+        ,wt.wallet_address
+        ,wt.date
+        ,wt.balance as balance
+        ,case when wt.net_transfers > 0 then wt.transfer_sequence end as buy_sequence
+        from `core.coin_wallet_transfers` wt
+        '''
+
     metadata_sql = '''
         select c.coin_id
         ,chain_id
@@ -113,18 +122,12 @@ def prepare_datasets():
         where cf.total_supply is not null
         '''
 
-    balances_sql = '''
-        select wt.coin_id
-        ,wt.wallet_address
-        ,wt.date
-        ,wt.balance as balance
-        ,case when wt.net_transfers > 0 then wt.transfer_sequence end as buy_sequence
-        from `core.coin_wallet_transfers` wt
-        '''
-
     # run sql queries
-    metadata_df = dgc().run_sql(metadata_sql)
     all_balances_df = dgc().run_sql(balances_sql)
+    metadata_df = dgc().run_sql(metadata_sql)
+
+    # convert coin_id string column to categorical to reduce memory usage
+    all_balances_df['coin_id'] = all_balances_df['coin_id'].astype('category')
 
     logger.debug('Wallet balance datasets retrieved after %.2f seconds.', time.time() - start_time)
 
