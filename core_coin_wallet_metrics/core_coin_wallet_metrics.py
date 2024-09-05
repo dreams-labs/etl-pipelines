@@ -61,7 +61,7 @@ def update_coin_wallet_metrics(request):
 
         # skip the coin if we do not have total supply from metadata_df, we cannot calculate all metrics
         if metadata_df.empty:
-            logger.DEBUG(f"Skipping coin_id {c} as no matching metadata found.")
+            logger.DEBUG(f"skipping coin_id {c} as no matching metadata found.")
             continue
 
         # calculate and merge metrics
@@ -114,7 +114,6 @@ def prepare_datasets():
         ,wt.balance as balance
         ,case when wt.net_transfers > 0 then wt.transfer_sequence end as buy_sequence
         from `core.coin_wallet_transfers` wt
-        where wallet_address <> '0x0000000000000000000000000000000000000000'
         '''
 
     # run sql queries
