@@ -59,6 +59,11 @@ def update_coin_wallet_metrics(request):
         balances_df = all_balances_df.loc[all_balances_df['coin_id'] == c].copy()
         metadata_df = all_metadata_df.loc[all_metadata_df['coin_id'] == c]
 
+        # skip the coin if we do not have total supply from metadata_df, we cannot calculate all metrics
+        if metadata_df.empty:
+            logger.DEBUG(f"Skipping coin_id {c} as no matching metadata found.")
+            continue
+
         # calculate and merge metrics
         coin_metrics_df = calculate_coin_metrics(metadata_df,balances_df)
 
@@ -76,11 +81,15 @@ def update_coin_wallet_metrics(request):
 def prepare_datasets():
     '''
     runs two bigquery queries to retrieve the dfs necessary for wallet metric calculation. 
-    note that the all_balanaces_df is very large as it contains all transfer-days for all coins. 
+    note that the all_balanaces_df is very large as it contains all transfer-days for all coins, 
+    which is why metadata is stored in a separate much smaller table. 
 
     returns:
-    - metadata_df (df): includes metadata about each coin such as total supply
-    - all_balances_df (df): includes the daily wallet data necessary to calculate relevant metrics
+    - metadata_df (df): 
+        includes metadata about each coin. total supply is the only requirement \
+        to calculate the metrics, the other fields are simply descriptive. 
+    - all_balances_df (df): 
+        includes the daily wallet data necessary to calculate relevant metrics
 
     '''
     start_time = time.time()
@@ -95,6 +104,7 @@ def prepare_datasets():
         ,cf.total_supply
         from `core.coins` c
         join `core.coin_facts_coingecko` cf on cf.coin_id = c.coin_id
+        where cf.total_supply is not null
         '''
 
     balances_sql = '''
