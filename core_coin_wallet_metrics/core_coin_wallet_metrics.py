@@ -125,11 +125,11 @@ def prepare_datasets():
     # run sql queries
     all_balances_df = dgc().run_sql(balances_sql)
     metadata_df = dgc().run_sql(metadata_sql)
+    logger.debug('Wallet balance datasets retrieved after %.2f seconds.', time.time() - start_time)
 
     # convert coin_id string column to categorical to reduce memory usage
     all_balances_df['coin_id'] = all_balances_df['coin_id'].astype('category')
-
-    logger.debug('Wallet balance datasets retrieved after %.2f seconds.', time.time() - start_time)
+    logger.debug('Converted coin_ids column from string to categorical after %.2f seconds.', time.time() - start_time)
 
     return metadata_df,all_balances_df
 
