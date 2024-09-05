@@ -86,7 +86,7 @@ def rebuild_core_coin_wallet_transfers():
                 join `core.chains` ch on ch.chain_text_dune = e.chain_text_source
             ),
 
-            coin_wallet_transfers_temp as (
+            coin_wallet_transfers_draft as (
                 -- create a draft of the output table that can be audited for inconsistencies
                 select c.coin_id
                 ,c.chain_id
