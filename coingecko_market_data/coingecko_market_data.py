@@ -29,7 +29,6 @@ def update_coingecko_market_data(request):
     # retrieve market data for each coin in need of updates
     for i in range(updates_df.shape[0]):
         try:
-
             # pause to avoid rate limit issues caused by cloud function repeating loop too quickly
             # which seems to create too many instances
             if i > 0:
@@ -102,6 +101,43 @@ def retrieve_updates_df():
     updates_df = dgc().run_sql(query_sql)
 
     return updates_df
+
+
+
+def retrieve_coingecko_market_data(coingecko_id):
+    '''
+    attempts to retrieve data from the coingecko api including error handling for various \
+        coingecko api status codes
+
+    params:
+        coingecko_id (string): coingecko id of coin
+
+    returns:
+        market_df (dataframe): raw api response of market data
+        api_status_code (int): status code of coingecko api call
+    '''
+    logger = logging.getLogger(__name__)
+    logger.addHandler(logging.NullHandler())
+    retry_attempts = 3
+
+    for attempt in range(retry_attempts):
+        market_df,api_status_code = ping_coingecko_api(coingecko_id)
+        if api_status_code == 200:
+            break
+        elif api_status_code == 404:
+            break
+        elif api_status_code == 429:
+            logger.info('coingecko api call timed out, retrying after a 60 second pause...')
+            time.sleep(60)
+            continue
+        else:
+            logger.error('unexpected coingecko api status code %s for %s, continuing to next coin.',
+                str(api_status_code), coingecko_id)
+            break
+    logger.info('coingecko api call for %s completed with status code %s.',
+        coingecko_id, str(api_status_code))
+
+    return market_df, api_status_code
 
 
 
@@ -244,42 +280,6 @@ def ping_coingecko_api(coingecko_id):
         df = None
 
     return df,r.status_code
-
-
-def retrieve_coingecko_market_data(coingecko_id):
-    '''
-    attempts to retrieve data from the coingecko api including error handling for various \
-        coingecko api status codes
-
-    params:
-        coingecko_id (string): coingecko id of coin
-
-    returns:
-        market_df (dataframe): raw api response of market data
-        api_status_code (int): status code of coingecko api call
-    '''
-    logger = logging.getLogger(__name__)
-    logger.addHandler(logging.NullHandler())
-    retry_attempts = 3
-
-    for attempt in range(retry_attempts):
-        market_df,api_status_code = ping_coingecko_api(coingecko_id)
-        if api_status_code == 200:
-            break
-        elif api_status_code == 404:
-            break
-        elif api_status_code == 429:
-            logger.info('coingecko api call timed out, retrying after a 60 second pause...')
-            time.sleep(60)
-            continue
-        else:
-            logger.error('unexpected coingecko api status code %s for %s, continuing to next coin.',
-                str(api_status_code), coingecko_id)
-            break
-    logger.info('coingecko api call for %s completed with status code %s.',
-        coingecko_id, str(api_status_code))
-
-    return market_df, api_status_code
 
 
 
