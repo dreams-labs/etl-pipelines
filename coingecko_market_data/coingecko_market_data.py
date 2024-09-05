@@ -32,13 +32,16 @@ def update_coin_market_data_coingecko(request):
     # 1. retrieve list of coins with a coingecko_id that need market data updates
     updates_df = retrieve_updates_df()
 
+
     # 2. retrieve market data for each coin in need of updates
+
+    all_market_data = []
     for i in range(updates_df.shape[0]):
         try:
             # pause to avoid rate limit issues caused by cloud function repeating loop too quickly
-            # which seems to create too many instances
+            # which seems to create too many instances. coingecko free api limit is 30 calls per minute. 
             if i > 0:
-                time.sleep(3)
+                time.sleep(2)
             
             # store iteration-specific variables
             coingecko_id = updates_df['coingecko_id'][i]
@@ -54,19 +57,20 @@ def update_coin_market_data_coingecko(request):
                 logger.info('formatting market data for %s...', coingecko_id)
                 market_df = format_and_add_columns(market_df, coingecko_id, coin_id, most_recent_record)
 
-                # skip to next coin if there's no new records available
-                if market_df.empty:
+                if not market_df.empty:
+                    all_market_data.append(market_df)
+                else:
                     logger.info('no new records found for %s, continuing to next coin.', coingecko_id)
-                    continue
-
-                # upload market data to bigquery
-                logger.info('uploading market data for %s...', coingecko_id)
-                upload_market_data(market_df)
-                continue
 
         except Exception as e:
             logger.error('an error occurred for coingecko_id %s: %s. continuing to next coin.', coingecko_id, e)
             continue
+
+    # Combine all data into a single DataFrame and upload it at once
+    if all_market_data:
+        combined_market_df = pd.concat(all_market_data, ignore_index=True)
+        logger.info('uploading combined market data...')
+        upload_market_data(combined_market_df)
 
     logger.info('update_coin_market_data_coingecko() completed successfully.')
 
