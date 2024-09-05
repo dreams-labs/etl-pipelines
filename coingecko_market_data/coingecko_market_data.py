@@ -19,14 +19,20 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
-def update_coingecko_market_data(request):
+def update_coin_market_data_coingecko(request):
     '''
-    runs all functions in sequence to update and upload coingecko market data
+    runs all functions in sequence to update and upload the coingecko market data to 
+    etl_pipelines.update_coin_market_data_coingecko. 
+
+    key steps:
+        1. retrieve a df showing the coins that are stale enough to need updates
+        2. for each coin in need of updates, ping the coingecko api and format any
+            new records, then upload them to bigquery. 
     '''
-    # retrieve list of coins with a coingecko_id that need market data updates
+    # 1. retrieve list of coins with a coingecko_id that need market data updates
     updates_df = retrieve_updates_df()
 
-    # retrieve market data for each coin in need of updates
+    # 2. retrieve market data for each coin in need of updates
     for i in range(updates_df.shape[0]):
         try:
             # pause to avoid rate limit issues caused by cloud function repeating loop too quickly
@@ -62,7 +68,7 @@ def update_coingecko_market_data(request):
             logger.error('an error occurred for coingecko_id %s: %s. continuing to next coin.', coingecko_id, e)
             continue
 
-    logger.info('update_coingecko_market_data() completed successfully.')
+    logger.info('update_coin_market_data_coingecko() completed successfully.')
 
     return f'{{"status":"200"}}'
 
