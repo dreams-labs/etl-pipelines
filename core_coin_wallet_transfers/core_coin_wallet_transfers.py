@@ -40,10 +40,12 @@ def update_core_coin_wallet_transfers(request):
 def update_exclusions_table():
     '''
     refreshes the etl_pipelines.core_coin_wallet_transfers_exclusions bigquery table by ingesting 
-    the underlying sheets data, formatting it, and uploading it to bigquery
+    the underlying sheets data, formatting it, and uploading it to bigquery. excluded addresses
+    include things like uniswap, burn/mint addresses, bridges, etc that result in negative balances
+    and transaction bloat.  
 
-    exclusions are maintained in the 'core_coin_wallet_transfers_exclusions' tab of this google sheet:
-    https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135#gid=388901135
+    exclusions are maintained in the 'core_coin_wallet_transfers_exclusions' tab of this sheet:
+    https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135
     '''
     # load the tab into a df
     df = dgc().read_google_sheet('11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs','core_coin_wallet_transfers_exclusions!A:E')
@@ -73,21 +75,8 @@ def rebuild_core_coin_wallet_transfers():
         truncate table core.coin_wallet_transfers;
 
         insert into core.coin_wallet_transfers (
-            select c.coin_id
-            ,c.chain_id
-            ,wnt.token_address
-            ,wnt.wallet_address
-            ,wnt.date
-            ,cast(wnt.daily_net_transfers as bigdecimal) as net_transfers
-            ,sum(cast(daily_net_transfers as bigdecimal)) 
-                over (partition by wnt.token_address,wnt.wallet_address order by wnt.date asc) as balance
-            ,count(daily_net_transfers) 
-                over (partition by wnt.token_address,wnt.wallet_address order by wnt.date asc) as transfer_sequence
-            from core.coins c
-            join core.chains ch on ch.chain_id = c.chain_id
-            join etl_pipelines.coin_wallet_net_transfers wnt on wnt.token_address = c.address 
-                and (wnt.chain_text_source = ch.chain_text_dune and wnt.data_source = 'dune')
-            left join (
+            with exclusion_wallet_addresses as (
+                -- these include things like uniswap, burn/mint addresses, bridges, etc
                 select e.chain_text_source
                 ,case 
                     when ch.is_case_sensitive=False then lower(e.wallet_address)
@@ -95,17 +84,58 @@ def rebuild_core_coin_wallet_transfers():
                     end as wallet_address
                 from `etl_pipelines.core_coin_wallet_transfers_exclusions` e
                 join `core.chains` ch on ch.chain_text_dune = e.chain_text_source
-            ) exclusions on exclusions.wallet_address = wnt.wallet_address
-                and exclusions.chain_text_source = wnt.chain_text_source
+            ),
 
-            -- remove dune's various representations of burn/mint addresses
-            where wnt.wallet_address <> 'None' -- removes burn/mint address for solana
-            and wnt.wallet_address <> '0x0000000000000000000000000000000000000000' -- removes burn/mint addresses
-            and wnt.wallet_address <> wnt.token_address 
-            and wnt.wallet_address <> '<nil>'
+            coin_wallet_transfers_temp as (
+                -- create a draft of the output table that can be audited for inconsistencies
+                select c.coin_id
+                ,c.chain_id
+                ,wnt.token_address
+                ,wnt.wallet_address
+                ,wnt.date
+                ,cast(wnt.daily_net_transfers as bigdecimal) as net_transfers
+                ,sum(cast(daily_net_transfers as bigdecimal)) 
+                    over (partition by wnt.token_address,wnt.wallet_address order by wnt.date asc) as balance
+                ,count(daily_net_transfers) 
+                    over (partition by wnt.token_address,wnt.wallet_address order by wnt.date asc) as transfer_sequence
+                from core.coins c
+                join core.chains ch on ch.chain_id = c.chain_id
+                join etl_pipelines.coin_wallet_net_transfers wnt on wnt.token_address = c.address 
+                    and (wnt.chain_text_source = ch.chain_text_dune and wnt.data_source = 'dune')
+                left join exclusion_wallet_addresses exclusions on exclusions.wallet_address = wnt.wallet_address
+                    and exclusions.chain_text_source = wnt.chain_text_source
 
-            -- remove manually excluded addresses
-            and exclusions.wallet_address is null
+                -- remove dune's various representations of burn/mint addresses
+                where wnt.wallet_address <> 'None' -- removes burn/mint address for solana
+                and wnt.wallet_address <> '0x0000000000000000000000000000000000000000' -- removes burn/mint addresses
+                and wnt.wallet_address <> wnt.token_address 
+                and wnt.wallet_address <> '<nil>'
+
+                -- remove the manually excluded addresses
+                and exclusions.wallet_address is null
+            ),
+
+            negative_wallets_check as (
+                -- identify how many negative balance wallets are associated with each coin. 
+                -- balances below -0.1 tokens are classified as negative to ignore rounding errors. 
+                select coin_id
+                ,count(wallet_address) as wallets
+                ,count(case when lowest_balance < -0.1 then wallet_address end) as negative_wallets
+                from (
+                    select coin_id
+                    ,wallet_address
+                    ,min(balance) as lowest_balance
+                    from coin_wallet_transfers_draft
+                    group by 1,2
+                )
+                group by 1
+            )
+
+            select cwt.*
+            from coin_wallet_transfers_draft cwt
+            join negative_wallets_check nw on nw.coin_id = cwt.coin_id
+            -- don't include coins with negative wallets
+            where nw.negative_wallets = 0
         );
 
         select 'core.coin_wallet_transfers' as table
