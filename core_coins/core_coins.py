@@ -101,6 +101,7 @@ def intake_new_community_calls_coins():
             left join `reference.chain_nicknames` chn on lower(chn.chain_reference) = lower(c.blockchain)
             left join core.chains ch on ch.chain_id = chn.chain_id
             where c.address is not null
+            and c.address <> '#n/a'
         ),
 
         data_checks as (
@@ -252,7 +253,8 @@ def refresh_core_coins():
                 from core.coin_wallet_transfers 
                 group by 1
             ) cwt on cwt.coin_id = ci.coin_id
-
+            where has_valid_chain = True
+            
         )
 
         '''
