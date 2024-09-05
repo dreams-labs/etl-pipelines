@@ -39,14 +39,14 @@ def update_core_coin_wallet_transfers(request):
 
 def update_exclusions_table():
     '''
-    refreshes the etl_pipelines.coin_wallet_net_transfers_exclusions bigquery table by ingesting 
+    refreshes the etl_pipelines.core_coin_wallet_transfers_exclusions bigquery table by ingesting 
     the underlying sheets data, formatting it, and uploading it to bigquery
 
-    exclusions are maintained in the 'coin_wallet_net_transfers_exclusions' tab of this google sheet:
+    exclusions are maintained in the 'core_coin_wallet_transfers_exclusions' tab of this google sheet:
     https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135#gid=388901135
     '''
     # load the tab into a df
-    df = dgc().read_google_sheet('11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs','coin_wallet_net_transfers_exclusions!A:E')
+    df = dgc().read_google_sheet('11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs','core_coin_wallet_transfers_exclusions!A:E')
 
     # format and upload df
     df['created_date'] = pd.to_datetime(df['created_date'])
@@ -54,7 +54,7 @@ def update_exclusions_table():
     dgc().upload_df_to_bigquery(
         df,
         'etl_pipelines',
-        'coin_wallet_net_transfers_exclusions',
+        'core_coin_wallet_transfers_exclusions',
         if_exists='replace'
     )
 
@@ -93,7 +93,7 @@ def rebuild_core_coin_wallet_transfers():
                     when ch.is_case_sensitive=False then lower(e.wallet_address)
                     else e.wallet_address
                     end as wallet_address
-                from `etl_pipelines.coin_wallet_net_transfers_exclusions` e
+                from `etl_pipelines.core_coin_wallet_transfers_exclusions` e
                 join `core.chains` ch on ch.chain_text_dune = e.chain_text_source
             ) exclusions on exclusions.wallet_address = wnt.wallet_address
                 and exclusions.chain_text_source = wnt.chain_text_source
