@@ -22,12 +22,13 @@ def update_core_coins(request):
     even if there are no new coins added the table should still be refreshed to make updates to new 
     data connections, such as new coingecko_ids, market data, etc. 
     '''
-
     # Get query parameter to control whether to intake new coins or to just rebuild core.coins
-    intake_new_coins = request.args.get('intake_new_coins', 'true').lower() == 'true'
-    
-    if intake_new_coins:
+    intake_new_coins = request.args.get('intake_new_coins', 'true').lower()
+
+    # intake new coins if instructed to do so
+    if intake_new_coins == 'true':
         logger.info(f"ingesting new coins to etl_pipelines.coin_intake...")
+
         # load new community calls into bigquery
         refresh_community_calls_table()
 
@@ -37,7 +38,9 @@ def update_core_coins(request):
         # add new coins with wallet transfer data from the whale chart function
         intake_new_wallet_transfer_coins()
 
+    
     # refresh core.coins, logging the number of coins before and after the refresh
+    logger.info(f"rebuilding core.coins table...")
     calls_coins_old,dune_coins_old,other_coins_old = check_coin_counts()
     refresh_core_coins()
     calls_coins,dune_coins,other_coins = check_coin_counts()
