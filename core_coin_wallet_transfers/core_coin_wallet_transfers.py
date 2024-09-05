@@ -39,10 +39,10 @@ def update_core_coin_wallet_transfers(request):
 
 def update_exclusions_table():
     '''
+    this is a list of excluded wallet addresses and includes uniswap, burn/mint addresses, 
+    bridges, etc that result in negative balances and transaction bloat. this function
     refreshes the etl_pipelines.core_coin_wallet_transfers_exclusions bigquery table by ingesting 
-    the underlying sheets data, formatting it, and uploading it to bigquery. excluded addresses
-    include things like uniswap, burn/mint addresses, bridges, etc that result in negative balances
-    and transaction bloat.  
+    the underlying sheets data, formatting it, and uploading it to bigquery. 
 
     exclusions are maintained in the 'core_coin_wallet_transfers_exclusions' tab of this sheet:
     https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135

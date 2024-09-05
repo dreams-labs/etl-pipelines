@@ -2,8 +2,6 @@
 calculates metrics related to the distribution of coin ownership across wallets
 '''
 # pylint: disable=C0301
-
-import logging
 import time
 from datetime import datetime
 from pytz import utc
@@ -56,20 +54,23 @@ def update_coin_wallet_metrics(request):
     # generate metrics for all coins
     for c in unique_coin_ids:
         # retrieve coin-specific dfs; balances_df will be altered so it needs the slower .copy()
+        logger.debug('Filtering coin-specific data from all_balances_df...')
         balances_df = all_balances_df.loc[all_balances_df['coin_id'] == c].copy()
         metadata_df = all_metadata_df.loc[all_metadata_df['coin_id'] == c]
 
         # skip the coin if we do not have total supply from metadata_df, we cannot calculate all metrics
         if metadata_df.empty:
-            logger.debug(f"skipping coin_id {c} as no matching metadata found.")
+            logger.debug("skipping coin_id %s as no matching metadata found.", c)
             continue
 
         # calculate and merge metrics
         coin_metrics_df = calculate_coin_metrics(metadata_df,balances_df)
+        logger.debug('Successfully retrieved coin_metrics_df.')
 
         # fill zeros for missing dates (currently impacts buyer behavior and gini columns)
         all_coin_metrics_df.fillna(0, inplace=True)
         all_coin_metrics_df = pd.concat([all_coin_metrics_df,coin_metrics_df])
+        logger.debug('Successfully marged coin_metrics_df into primary df.')
 
     # upload metrics to bigquery
     upload_coin_metrics_data(all_coin_metrics_df)
@@ -161,6 +162,7 @@ def calculate_coin_metrics(metadata_df,balances_df):
 
     # Merge All Metrics into One DataFrame
     # ------------------------------------
+    logger.debug('Merging all metrics into one df...')
     metrics_dfs = [
         wallets_by_ownership_df,
         buyers_new_vs_repeat_df,
@@ -339,13 +341,6 @@ def calculate_daily_gini(balances_df):
     balances_df = balances_df.sort_values(by=['wallet_address', 'date'])
     daily_balances = balances_df.drop_duplicates(subset=['wallet_address', 'date'], keep='last')
 
-    def efficient_gini(arr):
-        arr = np.sort(arr)
-        n = len(arr)
-        if (n * np.sum(arr)) == 0:
-            return None
-        index = np.arange(1, n + 1)
-        return (2 * np.sum(index * arr) - (n + 1) * np.sum(arr)) / (n * np.sum(arr))
 
     # Calculate Gini coefficient for each day
     gini_coefficients = daily_balances.groupby('date')['balance'].apply(efficient_gini)
@@ -377,12 +372,60 @@ def calculate_gini_without_mega_whales(balances_df, total_supply):
     # filter out addresses that have ever owned 5% or more supply
     mega_whales = balances_df.loc[balances_df['balance'] >= (total_supply * 0.05), 'wallet_address'].unique()
     balances_df_filtered = balances_df[~balances_df['wallet_address'].isin(set(mega_whales))]
-    
+
     # calculate gini
     gini_filtered_df = calculate_daily_gini(balances_df_filtered)
     gini_filtered_df.rename(columns={'gini_coefficient': 'gini_coefficient_excl_mega_whales'}, inplace=True)
 
     return gini_filtered_df
+
+
+
+def efficient_gini(arr):
+    """
+    Calculate the Gini coefficient, a measure of inequality, for a given array.
+
+    The Gini coefficient ranges between 0 and 1, where 0 indicates perfect equality
+    (everyone has the same value), and 1 indicates maximum inequality (all the value
+    is held by one entity).
+
+    Parameters:
+    arr : numpy.ndarray or list
+        A 1D array or list containing the values for which the Gini coefficient 
+        should be calculated. These values represent a distribution (e.g., income, wealth).
+
+    Returns:
+    float or None:
+        - Gini coefficient rounded to 6 decimal places if the array is non-empty and contains positive values.
+        - None if the sum of values is 0 or the array is empty (which means Gini cannot be calculated).
+
+    Notes:
+    - The array is first sorted because the Gini coefficient requires ordered data.
+    - This method uses an efficient, vectorized approach for computation.
+    """
+
+    # Sort the input array in ascending order
+    arr = np.sort(arr)
+    
+    # Get the number of elements in the array
+    n = len(arr)
+    
+    # Return None if the total sum of the array or number of elements is zero
+    if (n * np.sum(arr)) == 0:
+        return None
+    
+    # Return None if there are negative balances in the array
+    if np.any(arr < 0):
+        return None
+    
+    # Create an index array starting from 1 to n
+    index = np.arange(1, n + 1)
+    
+    # Calculate the Gini coefficient
+    gini = (2 * np.sum(index * arr) - (n + 1) * np.sum(arr)) / (n * np.sum(arr))
+    
+    # Return the Gini coefficient rounded to 6 decimal places
+    return round(gini, 6)
 
 
 
