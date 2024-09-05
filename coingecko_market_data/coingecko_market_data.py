@@ -12,6 +12,60 @@ import requests
 import pandas_gbq
 import functions_framework
 from dreams_core.googlecloud import GoogleCloud as dgc
+from dreams_core import core as dc
+
+# set up logger at the module level
+logger = dc.setup_logger()
+
+
+@functions_framework.http
+def update_coingecko_market_data(request):
+    '''
+    runs all functions in sequence to update and upload coingecko market data
+    '''
+    # retrieve list of coins with a coingecko_id that need market data updates
+    updates_df = retrieve_updates_df()
+
+    # retrieve market data for each coin in need of updates
+    for i in range(updates_df.shape[0]):
+        try:
+
+            # pause to avoid rate limit issues caused by cloud function repeating loop too quickly
+            # which seems to create too many instances
+            if i > 0:
+                time.sleep(3)
+            
+            # store iteration-specific variables
+            coingecko_id = updates_df['coingecko_id'][i]
+            coin_id = updates_df['coin_id'][i]
+            most_recent_record = updates_df['most_recent_record'][i]
+
+            # retrieve coingecko market data
+            logger.info('retreiving coingecko data for %s...', coingecko_id)
+            market_df,api_status_code = retrieve_coingecko_market_data(coingecko_id)
+
+            if api_status_code == 200:
+                # format and filter market data to prepare for upload
+                logger.info('formatting market data for %s...', coingecko_id)
+                market_df = format_and_add_columns(market_df, coingecko_id, coin_id, most_recent_record)
+
+                # skip to next coin if there's no new records available
+                if market_df.empty:
+                    logger.info('no new records found for %s, continuing to next coin.', coingecko_id)
+                    continue
+
+                # upload market data to bigquery
+                logger.info('uploading market data for %s...', coingecko_id)
+                upload_market_data(market_df)
+                continue
+
+        except Exception as e:
+            logger.error('an error occurred for coingecko_id %s: %s. continuing to next coin.', coingecko_id, e)
+            continue
+
+    logger.info('update_coingecko_market_data() completed successfully.')
+
+    return f'{{"status":"200"}}'
 
 
 
@@ -296,116 +350,3 @@ def upload_market_data(market_df):
         ,api_method='load_csv'
     )
     logger.info('appended upload df to %s.', table_name)
-
-
-
-def push_updates_to_bigquery():
-    '''
-    runs a sql query that inserts newly added rows in etl_pipelines.coin_market_data_coingecko \
-        into core.coin_market_data
-    '''
-    query_sql = '''
-    insert into core.coin_market_data (
-
-        select md.date
-        ,co.coin_id
-        ,co.chain_id
-        ,co.address
-        ,md.price
-
-        -- use fdv if market cap data isn't available
-        ,case 
-            when md.market_cap > 0 then md.market_cap
-            else cast(md.price*cgf.total_supply as int64)
-            end as market_cap
-
-        -- calculate fdv using total supply
-        ,cast(md.price*cgf.total_supply as int64) as fdv
-
-        -- calculate circulating supply using market cap
-        ,case
-            when md.market_cap > 0 then cast(md.market_cap/md.price as int64)
-            else cast(cgf.total_supply as int64)
-            end as circulating_supply
-
-        -- total supply retrieved from coingecko metadata tables
-        ,cast(cgf.total_supply as int64) as total_supply
-
-        ,md.volume
-        ,'coingecko' as data_source
-        ,md.updated_at
-        from core.coins co
-        join core.coin_facts_coingecko cgf on cgf.coin_id = co.coin_id
-        join etl_pipelines.coin_market_data_coingecko md on md.coin_id = co.coin_id
-
-        -- don't insert rows that already have data
-        left join core.coin_market_data cmd on cmd.coin_id = md.coin_id and cmd.date = md.date
-        where cmd.date is null
-
-    )
-    '''
-
-    dgc().run_sql(query_sql)
-
-
-
-@functions_framework.http
-def update_coingecko_market_data(request):
-    '''
-    runs all functions in sequence to update and upload coingecko market data
-    '''
-    # configure logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
-        datefmt='%d/%b/%Y %H:%M:%S'
-        )
-    logger = logging.getLogger(__name__)
-
-    # retrieve list of coins with a coingecko_id that need market data updates
-    updates_df = retrieve_updates_df()
-
-    # retrieve market data for each coin in need of updates
-    for i in range(updates_df.shape[0]):
-        try:
-
-            # pause to avoid rate limit issues caused by cloud function repeating loop too quickly
-            # which seems to create too many instances
-            if i > 0:
-                time.sleep(3)
-            
-            # store iteration-specific variables
-            coingecko_id = updates_df['coingecko_id'][i]
-            coin_id = updates_df['coin_id'][i]
-            most_recent_record = updates_df['most_recent_record'][i]
-
-            # retrieve coingecko market data
-            logger.info('retreiving coingecko data for %s...', coingecko_id)
-            market_df,api_status_code = retrieve_coingecko_market_data(coingecko_id)
-
-            if api_status_code == 200:
-                # format and filter market data to prepare for upload
-                logger.info('formatting market data for %s...', coingecko_id)
-                market_df = format_and_add_columns(market_df, coingecko_id, coin_id, most_recent_record)
-
-                # skip to next coin if there's no new records available
-                if market_df.empty:
-                    logger.info('no new records found for %s, continuing to next coin.', coingecko_id)
-                    continue
-
-                # upload market data to bigquery
-                logger.info('uploading market data for %s...', coingecko_id)
-                upload_market_data(market_df)
-                continue
-
-        except Exception as e:
-            logger.error('an error occurred for coingecko_id %s: %s. continuing to next coin.', coingecko_id, e)
-            continue
-
-    # add the new records to core.coin_market_data
-    logger.info('pushing new coingecko market data records to core.coin_market_data...')
-    push_updates_to_bigquery()
-
-    logger.info('update_coingecko_market_data() completed successfully.')
-
-    return f'{{"status":"200"}}'
