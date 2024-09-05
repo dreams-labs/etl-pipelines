@@ -1,7 +1,0 @@
-functions-framework==3.*
-pandas==1.5.3
-numpy==1.25.2
-requests==2.31.0
-db-dtypes==1.2.0
-dreams_core==0.2.11
-dune_client>=1.7.2
