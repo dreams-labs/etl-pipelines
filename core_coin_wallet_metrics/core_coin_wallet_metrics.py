@@ -47,9 +47,13 @@ def update_coin_wallet_metrics(request):
     # retrieve full sets of metadata and daily wallet balances
     all_metadata_df,all_balances_df = prepare_datasets()
 
+    # convert string column to categorical to reduce memory usage
+    all_balances_df['coin_id'] = all_balances_df['coin_id'].astype('category')
+
+
     # prepare list and df for loop iteration
     unique_coin_ids = all_balances_df['coin_id'].drop_duplicates().tolist()
-    all_coin_metrics_df = pd.DataFrame()
+    coin_metrics_df_list = []
 
     # generate metrics for all coins
     for c in unique_coin_ids:
@@ -65,12 +69,13 @@ def update_coin_wallet_metrics(request):
 
         # calculate and merge metrics
         coin_metrics_df = calculate_coin_metrics(metadata_df,balances_df)
+        coin_metrics_df_list.append(coin_metrics_df)
         logger.debug('Successfully retrieved coin_metrics_df.')
 
-        # fill zeros for missing dates (currently impacts buyer behavior and gini columns)
-        all_coin_metrics_df.fillna(0, inplace=True)
-        all_coin_metrics_df = pd.concat([all_coin_metrics_df,coin_metrics_df])
-        logger.debug('Successfully marged coin_metrics_df into primary df.')
+
+    # fill zeros for missing dates (currently impacts buyer behavior and gini columns)
+    all_coin_metrics_df = pd.concat(coin_metrics_df_list, ignore_index=True)
+    all_coin_metrics_df.fillna(0, inplace=True)
 
     # upload metrics to bigquery
     upload_coin_metrics_data(all_coin_metrics_df)
@@ -403,27 +408,26 @@ def efficient_gini(arr):
     - The array is first sorted because the Gini coefficient requires ordered data.
     - This method uses an efficient, vectorized approach for computation.
     """
-
     # Sort the input array in ascending order
     arr = np.sort(arr)
-    
+
     # Get the number of elements in the array
     n = len(arr)
-    
+
     # Return None if the total sum of the array or number of elements is zero
     if (n * np.sum(arr)) == 0:
         return None
-    
+
     # Return None if there are negative balances in the array
     if np.any(arr < 0):
         return None
-    
+
     # Create an index array starting from 1 to n
     index = np.arange(1, n + 1)
-    
+
     # Calculate the Gini coefficient
     gini = (2 * np.sum(index * arr) - (n + 1) * np.sum(arr)) / (n * np.sum(arr))
-    
+
     # Return the Gini coefficient rounded to 6 decimal places
     return round(gini, 6)
 
