@@ -15,11 +15,13 @@ main:
                 type: OIDC
             timeout: 300
 
-    - refreshCoreCoins:
+    - ingestNewCoins:
         # ingest new coins from community calls, whale charts, etc
         call: http.get
         args:
             url: https://core-coins-fatui3rd2a-uw.a.run.app
+            query: 
+                "intake_new_coins": "true"
             auth:
                 type: OIDC
             timeout: 300
@@ -39,3 +41,14 @@ main:
             workflow_id: core-coin-market-data
             connector_params:
                 timeout: 3000
+
+    - rebuildCoreCoins:
+        # rebuild core.coins to reflect coingecko data completeness
+        call: http.get
+        args:
+            url: https://core-coins-fatui3rd2a-uw.a.run.app
+            query: 
+                "intake_new_coins": "false"
+            auth:
+                type: OIDC
+            timeout: 300
