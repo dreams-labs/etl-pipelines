@@ -27,6 +27,7 @@ def update_core_coins(request):
     intake_new_coins = request.args.get('intake_new_coins', 'true').lower() == 'true'
     
     if intake_new_coins:
+        logger.info(f"ingesting new coins to etl_pipelines.coin_intake...")
         # load new community calls into bigquery
         refresh_community_calls_table()
 
