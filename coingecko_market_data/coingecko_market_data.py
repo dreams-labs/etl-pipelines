@@ -31,7 +31,7 @@ def update_coin_market_data_coingecko(request):
     '''
     # 1. retrieve list of coins with a coingecko_id that need market data updates
     updates_df = retrieve_updates_df()
-
+    logger.info('retrieved bigquery for %s records with stale coingecko market data...', str(updates_df.shape[0]))
 
     # 2. retrieve market data for each coin in need of updates
 
@@ -53,13 +53,13 @@ def update_coin_market_data_coingecko(request):
             market_df,api_status_code = retrieve_coingecko_market_data(coingecko_id)
 
             if api_status_code == 200:
-                # format and filter market data to prepare for upload
-                logger.info('formatting market data for %s...', coingecko_id)
-                market_df = format_and_add_columns(market_df, coingecko_id, coin_id, most_recent_record)
-
                 if not market_df.empty:
                     logger.info('successfully retrieved %s records for %s.', str(market_df.shape[0]), coingecko_id)
+
+                    # format and filter market data to prepare for upload
+                    market_df = format_and_add_columns(market_df, coingecko_id, coin_id, most_recent_record)
                     all_market_data.append(market_df)
+
                 else:
                     logger.info('no new records found for %s.', coingecko_id)
 
