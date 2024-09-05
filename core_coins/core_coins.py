@@ -259,12 +259,7 @@ def refresh_core_coins():
                 group by 1
             ) cwt on cwt.coin_id = ci.coin_id
             where has_valid_chain = True   
-        );
-
-        -- return the counts by source for logging purposes
-        select source, count(coin_id) as coins 
-        from core.coins 
-        group by source;
+        )
         '''
 
     df = dgc().run_sql(query_sql)
