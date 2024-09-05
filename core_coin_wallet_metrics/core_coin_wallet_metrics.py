@@ -61,7 +61,7 @@ def update_coin_wallet_metrics(request):
 
         # skip the coin if we do not have total supply from metadata_df, we cannot calculate all metrics
         if metadata_df.empty:
-            logger.DEBUG(f"skipping coin_id {c} as no matching metadata found.")
+            logger.debug(f"skipping coin_id {c} as no matching metadata found.")
             continue
 
         # calculate and merge metrics
