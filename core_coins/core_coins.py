@@ -36,13 +36,12 @@ def update_core_coins(request):
         # add new coins with wallet transfer data from the whale chart function
         intake_new_wallet_transfer_coins()
 
-    # refresh core.coins to add coins or update data completeness (e.g. has_market_data, etc)
+    # refresh core.coins, logging the number of coins before and after the refresh
     calls_coins_old,dune_coins_old,other_coins_old = check_coin_counts()
     refresh_core_coins()
-
-    # summarize changes for logging purposes
     calls_coins,dune_coins,other_coins = check_coin_counts()
 
+    # summarize changes for logging purposes
     new_calls = calls_coins - calls_coins_old
     new_dune = dune_coins - dune_coins_old
     new_other = other_coins - other_coins_old
