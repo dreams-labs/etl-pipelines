@@ -94,7 +94,7 @@ def retrieve_updates_df():
         from coingecko_data_status cds
         where (
             cds.most_recent_record is null
-            or cds.most_recent_record < (current_date('UTC') - 1)
+            or cds.most_recent_record < (current_date('UTC') - 2)
             )
         '''
 
