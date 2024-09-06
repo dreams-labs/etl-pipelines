@@ -4,5 +4,5 @@ pandas==1.5.3
 numpy==1.25.2
 requests==2.31.0
 functions-framework==3.*
-dreams_core==0.1.1
+dreams_core==0.2.22
 pandas-gbq==0.22.0
