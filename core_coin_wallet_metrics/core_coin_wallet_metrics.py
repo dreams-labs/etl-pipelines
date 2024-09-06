@@ -4,6 +4,7 @@ calculates metrics related to the distribution of coin ownership across wallets
 # pylint: disable=C0301
 import time
 from datetime import datetime
+import logging
 from pytz import utc
 import pandas as pd
 import numpy as np
@@ -202,7 +203,7 @@ def calculate_wallet_counts(balances_df,total_supply):
     '''
     start_time = time.time()
 
-    # Calculate total supply and generate wallet bins
+    # Calculate wallet bin sizes from total supply
     wallet_bins, wallet_labels = generate_wallet_bins(total_supply)
 
     logger.debug('Calculating daily balances for each wallet...')
@@ -245,6 +246,7 @@ def generate_wallet_bins(total_supply):
 
     # defining bin boundaries
     percentages = [
+        0.00000001,
         0.0000010,
         0.0000018,
         0.0000032,
@@ -266,8 +268,9 @@ def generate_wallet_bins(total_supply):
 
     wallet_bins = [total_supply * pct for pct in percentages] + [np.inf]
 
-    # defining labels, 0s are handled nonstandardly so they aren't done as a loop
+    # defining labels
     wallet_labels = [
+        'wallets_0p000001_pct',
         'wallets_0p00010_pct',
         'wallets_0p00018_pct',
         'wallets_0p00032_pct',
@@ -456,6 +459,7 @@ def upload_coin_metrics_data(all_coin_metrics_df):
     # Set df datatypes of upload df
     dtype_mapping = {
         'date': 'datetime64[us, UTC]',
+        'wallets_0p000001_pct': 'int64',
         'wallets_0p00010_pct': 'int64',
         'wallets_0p00018_pct': 'int64',
         'wallets_0p00032_pct': 'int64',
@@ -493,6 +497,7 @@ def upload_coin_metrics_data(all_coin_metrics_df):
     schema = [
         {'name': 'coin_id', 'type': 'STRING'},
         {'name': 'date', 'type': 'DATETIME'},
+        {'name': 'wallets_0p000001_pct', 'type': 'INT64'},
         {'name': 'wallets_0p00010_pct', 'type': 'INT64'},
         {'name': 'wallets_0p00018_pct', 'type': 'INT64'},
         {'name': 'wallets_0p00032_pct', 'type': 'INT64'},
