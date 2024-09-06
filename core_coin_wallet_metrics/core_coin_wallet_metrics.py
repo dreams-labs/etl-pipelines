@@ -104,7 +104,6 @@ def prepare_datasets():
         join `core.coins` c on c.coin_id = wt.coin_id
         where c.total_supply is not null
         order by wt.coin_id,wt.wallet_address,wt.date -- sorted for pandas df efficiency
-        limit 10000
         '''
 
     metadata_sql = '''
@@ -488,6 +487,7 @@ def upload_coin_metrics_data(all_coin_metrics_df):
     upload_df = upload_df[['coin_id'] + [col for col in upload_df.columns if col != 'coin_id']]
 
     # Upload df to BigQuery
+    logger.info('Initiating bigquery upload...')
     project_id = 'western-verve-411004'
     table_name = 'core.coin_wallet_metrics'
     schema = [
