@@ -47,7 +47,7 @@ def update_coin_wallet_metrics(request):
 
     coin_metrics_df_list = []
 
-    logger.debug('Starting generation of metrics for each coin...')
+    logger.info('Starting generation of metrics for each coin...')
     # generate metrics for all coins
     for c in unique_coin_ids:
         # retrieve coin-specific dfs; balances_df will be altered so it needs the slower .copy()
@@ -92,13 +92,13 @@ def prepare_datasets():
 
     '''
     step_time = time.time()
-    logger.debug('Retrieving datasets required for wallet balance metrics...')
+    logger.info('Retrieving datasets required for wallet balance metrics...')
 
     balances_sql = '''
         select wt.coin_id
         ,wt.wallet_address
         ,wt.date
-        ,wt.balance as balance
+        ,cast(wt.balance as float64) as balance
         ,case when wt.net_transfers > 0 then wt.transfer_sequence end as buy_sequence
         from `core.coin_wallet_transfers` wt
         join `core.coins` c on c.coin_id = wt.coin_id
@@ -119,13 +119,13 @@ def prepare_datasets():
     # run sql queries
     all_balances_df = dgc().run_sql(balances_sql)
     metadata_df = dgc().run_sql(metadata_sql)
-    logger.debug('Wallet balance datasets retrieved after %.2f seconds.', time.time() - step_time)
+    logger.info('Wallet balance datasets retrieved after %.2f seconds.', time.time() - step_time)
     step_time = time.time()
 
     # convert coin_id string column to categorical to reduce memory usage
     # this takes ~2 minutes but dramatically improves metric calculation performance later on
     all_balances_df['coin_id'] = all_balances_df['coin_id'].astype('category')
-    logger.debug('Converted coin_ids column from string to categorical after %.2f seconds.', time.time() - step_time)
+    logger.info('Converted coin_ids column from string to categorical after %.2f seconds.', time.time() - step_time)
 
     return metadata_df,all_balances_df
 
