@@ -4,7 +4,6 @@ calculates metrics related to the distribution of coin ownership across wallets
 # pylint: disable=C0301
 import time
 from datetime import datetime
-import logging
 from pytz import utc
 import pandas as pd
 import numpy as np
@@ -18,6 +17,7 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
+# pylint: disable=unused-argument
 def update_coin_wallet_metrics(request):
     '''
     HTTP-triggered Cloud Function that calculates and uploads metrics related to the 
@@ -124,9 +124,8 @@ def prepare_datasets():
     step_time = time.time()
 
     # convert coin_id string column to categorical to reduce memory usage
-    # this takes ~2 minutes but dramatically improves metric calculation performance later on
     all_balances_df['coin_id'] = all_balances_df['coin_id'].astype('category')
-    logger.info('Converted coin_ids column from string to categorical after %.2f seconds.', time.time() - step_time)
+    logger.debug('Converted coin_ids column from string to categorical after %.2f seconds.', time.time() - step_time)
 
     return metadata_df,all_balances_df
 
@@ -449,84 +448,90 @@ def upload_coin_metrics_data(all_coin_metrics_df):
     Returns:
         None
     '''
-    # Add metadata to upload_df
-    upload_df = all_coin_metrics_df.copy()
-    upload_df['updated_at'] = datetime.now(utc)
+    try:
+        # Add metadata to upload_df
+        upload_df = all_coin_metrics_df.copy()
+        upload_df['updated_at'] = datetime.now(utc)
 
-    # Localize date column
-    upload_df['date'] = pd.to_datetime(upload_df['date']).dt.tz_localize(utc)
+        # Localize date column
+        upload_df['date'] = pd.to_datetime(upload_df['date']).dt.tz_localize(utc)
 
-    # Set df datatypes of upload df
-    dtype_mapping = {
-        'date': 'datetime64[us, UTC]',
-        'wallets_0p000001_pct': 'int64',
-        'wallets_0p00010_pct': 'int64',
-        'wallets_0p00018_pct': 'int64',
-        'wallets_0p00032_pct': 'int64',
-        'wallets_0p00056_pct': 'int64',
-        'wallets_0p0010_pct': 'int64',
-        'wallets_0p0018_pct': 'int64',
-        'wallets_0p0032_pct': 'int64',
-        'wallets_0p0056_pct': 'int64',
-        'wallets_0p010_pct': 'int64',
-        'wallets_0p018_pct': 'int64',
-        'wallets_0p032_pct': 'int64',
-        'wallets_0p056_pct': 'int64',
-        'wallets_0p10_pct': 'int64',
-        'wallets_0p18_pct': 'int64',
-        'wallets_0p32_pct': 'int64',
-        'wallets_0p56_pct': 'int64',
-        'wallets_1p0_pct': 'int64',
-        'buyers_new': 'int64',
-        'buyers_repeat': 'int64',
-        'gini_coefficient': 'float64',
-        'gini_coefficient_excl_mega_whales': 'float64',
-        'coin_id': 'object',
-        'updated_at': 'datetime64[us, UTC]'
-    }
-    upload_df = upload_df.astype(dtype_mapping)
-    logger.info('Prepared upload df with %s rows.', len(upload_df))
+        # Set df datatypes of upload df
+        dtype_mapping = {
+            'date': 'datetime64[us, UTC]',
+            'wallets_0p000001_pct': 'int64',
+            'wallets_0p00010_pct': 'int64',
+            'wallets_0p00018_pct': 'int64',
+            'wallets_0p00032_pct': 'int64',
+            'wallets_0p00056_pct': 'int64',
+            'wallets_0p0010_pct': 'int64',
+            'wallets_0p0018_pct': 'int64',
+            'wallets_0p0032_pct': 'int64',
+            'wallets_0p0056_pct': 'int64',
+            'wallets_0p010_pct': 'int64',
+            'wallets_0p018_pct': 'int64',
+            'wallets_0p032_pct': 'int64',
+            'wallets_0p056_pct': 'int64',
+            'wallets_0p10_pct': 'int64',
+            'wallets_0p18_pct': 'int64',
+            'wallets_0p32_pct': 'int64',
+            'wallets_0p56_pct': 'int64',
+            'wallets_1p0_pct': 'int64',
+            'buyers_new': 'int64',
+            'buyers_repeat': 'int64',
+            'gini_coefficient': 'float64',
+            'gini_coefficient_excl_mega_whales': 'float64',
+            'coin_id': 'object',
+            'updated_at': 'datetime64[us, UTC]'
+        }
+        upload_df = upload_df.astype(dtype_mapping)
+        logger.info('Prepared upload df with %s rows.', len(upload_df))
 
-    # Reorder columns to have coin_id first
-    upload_df = upload_df[['coin_id'] + [col for col in upload_df.columns if col != 'coin_id']]
+        # Reorder columns to have coin_id first
+        upload_df = upload_df[['coin_id'] + [col for col in upload_df.columns if col != 'coin_id']]
 
-    # Upload df to BigQuery
-    logger.info('Initiating bigquery upload...')
-    project_id = 'western-verve-411004'
-    table_name = 'core.coin_wallet_metrics'
-    schema = [
-        {'name': 'coin_id', 'type': 'STRING'},
-        {'name': 'date', 'type': 'DATETIME'},
-        {'name': 'wallets_0p000001_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p00010_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p00018_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p00032_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p00056_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p0010_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p0018_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p0032_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p0056_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p010_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p018_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p032_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p056_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p10_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p18_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p32_pct', 'type': 'INT64'},
-        {'name': 'wallets_0p56_pct', 'type': 'INT64'},
-        {'name': 'wallets_1p0_pct', 'type': 'INT64'},
-        {'name': 'buyers_new', 'type': 'INT64'},
-        {'name': 'buyers_repeat', 'type': 'INT64'},
-        {'name': 'gini_coefficient', 'type': 'FLOAT64'},
-        {'name': 'gini_coefficient_excl_mega_whales', 'type': 'FLOAT64'},
-        {'name': 'updated_at', 'type': 'DATETIME'}
-    ]
-    pandas_gbq.to_gbq(
-        upload_df,
-        table_name,
-        project_id=project_id,
-        if_exists='replace',
-        table_schema=schema,
-        progress_bar=False
-    )
-    logger.info('Replaced data in %s.', table_name)
+        # Upload df to BigQuery
+        logger.info('Initiating bigquery upload...')
+        project_id = 'western-verve-411004'
+        table_name = 'core.coin_wallet_metrics'
+        schema = [
+            {'name': 'coin_id', 'type': 'STRING'},
+            {'name': 'date', 'type': 'DATETIME'},
+            {'name': 'wallets_0p000001_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p00010_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p00018_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p00032_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p00056_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p0010_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p0018_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p0032_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p0056_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p010_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p018_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p032_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p056_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p10_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p18_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p32_pct', 'type': 'INT64'},
+            {'name': 'wallets_0p56_pct', 'type': 'INT64'},
+            {'name': 'wallets_1p0_pct', 'type': 'INT64'},
+            {'name': 'buyers_new', 'type': 'INT64'},
+            {'name': 'buyers_repeat', 'type': 'INT64'},
+            {'name': 'gini_coefficient', 'type': 'FLOAT64'},
+            {'name': 'gini_coefficient_excl_mega_whales', 'type': 'FLOAT64'},
+            {'name': 'updated_at', 'type': 'DATETIME'}
+        ]
+        pandas_gbq.to_gbq(
+            upload_df,
+            table_name,
+            project_id=project_id,
+            if_exists='replace',
+            table_schema=schema,
+            progress_bar=False
+        )
+        logger.info('Replaced data in %s.', table_name)
+
+    except ValueError as val_err:
+        logger.error('ValueError during upload process: %s', val_err)
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        logger.error('Unexpected error during BigQuery upload: %s', e)
