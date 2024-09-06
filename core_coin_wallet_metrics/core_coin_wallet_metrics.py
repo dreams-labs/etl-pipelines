@@ -34,13 +34,6 @@ def update_coin_wallet_metrics(request):
     3. Aggregates metrics for all coins into a single DataFrame.
     4. Uploads the results to the BigQuery table `core.coin_wallet_metrics`.
 
-    Parameters:
-    - request (flask.Request): The HTTP request object. This is automatically passed when the function 
-      is triggered via an HTTP request, but is unused within the function.
-
-    Returns:
-    - str: A success message once the process is complete and the metrics have been uploaded.
-
     Raises:
     - May raise errors related to data retrieval, computation, or BigQuery upload if any step fails.
     '''
@@ -54,7 +47,7 @@ def update_coin_wallet_metrics(request):
 
     coin_metrics_df_list = []
 
-    logger.debug('Successfully retrieved coin_metrics_df.')
+    logger.debug('Starting generation of metrics for each coin...')
     # generate metrics for all coins
     for c in unique_coin_ids:
         # retrieve coin-specific dfs; balances_df will be altered so it needs the slower .copy()
@@ -87,21 +80,20 @@ def update_coin_wallet_metrics(request):
 def prepare_datasets():
     '''
     runs two bigquery queries to retrieve the dfs necessary for wallet metric calculation. 
-    note that the all_balanaces_df is very large as it contains all transfer-days for all coins, 
+    note that the all_balances_df is very large as it contains all transfer-days for all coins, 
     which is why metadata is stored in a separate much smaller table. 
 
+    coins without total supply data are excluded from both queries because total supply is 
+    required to calculate the relevant metrics. 
+
     returns:
-    - metadata_df (df): 
-        includes metadata about each coin. total supply is the only requirement \
-        to calculate the metrics, the other fields are simply descriptive. 
-    - all_balances_df (df): 
-        includes the daily wallet data necessary to calculate relevant metrics
+    - metadata_df (df): metadata about each coin, with total supply necessary to calculate metrics
+    - all_balances_df (df): daily wallet activity necessary to calculate relevant metrics
 
     '''
     start_time = time.time()
     logger.debug('Retrieving datasets required for wallet balance metrics...')
 
-    # sql queries
     balances_sql = '''
         select wt.coin_id
         ,wt.wallet_address
@@ -109,6 +101,10 @@ def prepare_datasets():
         ,wt.balance as balance
         ,case when wt.net_transfers > 0 then wt.transfer_sequence end as buy_sequence
         from `core.coin_wallet_transfers` wt
+        join `core.coins` c on c.coin_id = wt.coin_id
+        where c.total_supply is not null
+        order by wt.coin_id,wt.wallet_address,wt.date -- sorted for pandas df efficiency
+        limit 10000
         '''
 
     metadata_sql = '''
@@ -116,10 +112,9 @@ def prepare_datasets():
         ,chain_id
         ,c.address as token_address
         ,c.symbol
-        ,cf.total_supply
+        ,c.total_supply
         from `core.coins` c
-        join `core.coin_facts_coingecko` cf on cf.coin_id = c.coin_id
-        where cf.total_supply is not null
+        where c.total_supply is not null
         '''
 
     # run sql queries
@@ -128,6 +123,7 @@ def prepare_datasets():
     logger.debug('Wallet balance datasets retrieved after %.2f seconds.', time.time() - start_time)
 
     # convert coin_id string column to categorical to reduce memory usage
+    # this takes ~2 minutes but dramatically improves metric calculation performance later on
     all_balances_df['coin_id'] = all_balances_df['coin_id'].astype('category')
     logger.debug('Converted coin_ids column from string to categorical after %.2f seconds.', time.time() - start_time)
 
