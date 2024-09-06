@@ -91,7 +91,7 @@ def prepare_datasets():
     - all_balances_df (df): daily wallet activity necessary to calculate relevant metrics
 
     '''
-    start_time = time.time()
+    step_time = time.time()
     logger.debug('Retrieving datasets required for wallet balance metrics...')
 
     balances_sql = '''
@@ -120,12 +120,13 @@ def prepare_datasets():
     # run sql queries
     all_balances_df = dgc().run_sql(balances_sql)
     metadata_df = dgc().run_sql(metadata_sql)
-    logger.debug('Wallet balance datasets retrieved after %.2f seconds.', time.time() - start_time)
+    logger.debug('Wallet balance datasets retrieved after %.2f seconds.', time.time() - step_time)
+    step_time = time.time()
 
     # convert coin_id string column to categorical to reduce memory usage
     # this takes ~2 minutes but dramatically improves metric calculation performance later on
     all_balances_df['coin_id'] = all_balances_df['coin_id'].astype('category')
-    logger.debug('Converted coin_ids column from string to categorical after %.2f seconds.', time.time() - start_time)
+    logger.debug('Converted coin_ids column from string to categorical after %.2f seconds.', time.time() - step_time)
 
     return metadata_df,all_balances_df
 
