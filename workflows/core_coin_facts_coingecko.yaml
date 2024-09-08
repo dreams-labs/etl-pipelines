@@ -1,22 +1,28 @@
-# Workflow to retrieve market data from CoinGecko and update core coin market data 
-# via HTTP GET requests, with OIDC authentication.
+# Workflow to retrieve metadata from CoinGecko, parse and upload the metadata, 
+# and rebuild the core.coin_metdata_coingecko table. 
 main:
     steps:
     - init:
         assign:
         - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
         - service_account: western-verve-411004@appspot.gserviceaccount.com
-    - retrieveCoingeckoMarketData:
+    - retrieveCoinMetadata:
         call: http.get
         args:
-            url: https://coingecko-market-data-https-fatui3rd2a-uw.a.run.app
+            url: https://coingecko-coin-metadata-fatui3rd2a-uw.a.run.app
             auth:
                 type: OIDC
             timeout: 1800
-    - updateCoreCoinMarketData:
+    - parseMetadataJson:
         call: http.get
         args:
-            url: https://core-coin-market-data-fatui3rd2a-uw.a.run.app
+            url: https://coingecko-parse-json-fatui3rd2a-uw.a.run.app
+            auth:
+                type: OIDC
+    - rebuildCoreTable:
+        call: http.get
+        args:
+            url: https://core-coin-facts-coingecko-fatui3rd2a-uw.a.run.app
             auth:
                 type: OIDC
         result: resp
