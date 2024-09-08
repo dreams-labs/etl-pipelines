@@ -25,7 +25,7 @@ def update_core_coin_wallet_transfers(request):
     update_exclusions_table()
 
     # insert new coingecko market data records to core.coin_market_data
-    logger.info(f'rebuilding table core.coin_wallet_transfers...')
+    logger.info('rebuilding table core.coin_wallet_transfers...')
     counts_df = rebuild_core_coin_wallet_transfers()
 
     # log job summary
@@ -33,7 +33,7 @@ def update_core_coin_wallet_transfers(request):
     etl_count = counts_df[counts_df['table']=='etl_pipelines.coin_wallet_net_transfers']['records'].iloc[0]
     logger.info('rebuilt core.coin_wallet_transfers [%s rows] from etl_pipelines.coin_wallet_net_transfers [%s rows].',core_count,etl_count)
 
-    return f'{{"rebuild of core.coin_wallet_transfers complete."}}'
+    return '{{"rebuild of core.coin_wallet_transfers complete."}}'
 
 
 
@@ -95,9 +95,9 @@ def rebuild_core_coin_wallet_transfers():
                 ,wnt.date
                 ,cast(wnt.daily_net_transfers as bigdecimal) as net_transfers
                 ,sum(cast(daily_net_transfers as bigdecimal)) 
-                    over (partition by wnt.token_address,wnt.wallet_address order by wnt.date asc) as balance
+                    over (partition by wnt.token_address,wnt.wallet_address,ch.chain_id order by wnt.date asc) as balance
                 ,count(daily_net_transfers) 
-                    over (partition by wnt.token_address,wnt.wallet_address order by wnt.date asc) as transfer_sequence
+                    over (partition by wnt.token_address,wnt.wallet_address,ch.chain_id order by wnt.date asc) as transfer_sequence
                 from core.coins c
                 join core.chains ch on ch.chain_id = c.chain_id
                 join etl_pipelines.coin_wallet_net_transfers wnt on wnt.token_address = c.address 
