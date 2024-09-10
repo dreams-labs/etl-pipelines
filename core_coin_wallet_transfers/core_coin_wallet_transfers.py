@@ -75,15 +75,41 @@ def rebuild_core_coin_wallet_transfers():
         truncate table core.coin_wallet_transfers;
 
         insert into core.coin_wallet_transfers (
-            with exclusion_wallet_addresses as (
-                -- these include things like uniswap, burn/mint addresses, bridges, etc
+
+            with exclusion_addresses as (
+                -- manual exclusions from https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=1863435581#gid=1863435581
                 select e.chain_text_source
                 ,case 
                     when ch.is_case_sensitive=False then lower(e.wallet_address)
                     else e.wallet_address
                     end as wallet_address
                 from `etl_pipelines.core_coin_wallet_transfers_exclusions` e
-                join `core.chains` ch on ch.chain_text_dune = e.chain_text_source
+                join `core.chains` ch on (
+                    (ch.chain_text_dune = e.chain_text_source)
+                    or e.chain_text_source = 'all'
+                    )
+
+                union all
+
+                -- cex addresses from dune query https://dune.com/queries/4057433
+                select e.blockchain as chain_text_source
+                ,case 
+                    when ch.is_case_sensitive=False then lower(e.wallet_address)
+                    else e.wallet_address
+                    end as wallet_address
+                from `reference.addresses_cexes` e
+                join `core.chains` ch on ch.chain_text_dune = e.blockchain
+
+                union all 
+
+                -- contract addresses from dune query https://dune.com/queries/4057525
+                select e.blockchain as chain_text_source
+                ,case 
+                    when ch.is_case_sensitive=False then lower(e.address)
+                    else e.address
+                    end as address
+                from `reference.addresses_contracts` e
+                join `core.chains` ch on ch.chain_text_dune = e.blockchain
             ),
 
             coin_wallet_transfers_draft as (
@@ -102,7 +128,7 @@ def rebuild_core_coin_wallet_transfers():
                 join core.chains ch on ch.chain_id = c.chain_id
                 join etl_pipelines.coin_wallet_net_transfers wnt on wnt.token_address = c.address 
                     and (wnt.chain_text_source = ch.chain_text_dune and wnt.data_source = 'dune')
-                left join exclusion_wallet_addresses exclusions on exclusions.wallet_address = wnt.wallet_address
+                left join exclusion_addresses exclusions on exclusions.wallet_address = wnt.wallet_address
                     and exclusions.chain_text_source = wnt.chain_text_source
 
                 -- remove dune's various representations of burn/mint addresses
@@ -134,8 +160,9 @@ def rebuild_core_coin_wallet_transfers():
             select cwt.*
             from coin_wallet_transfers_draft cwt
             join negative_wallets_check nw on nw.coin_id = cwt.coin_id
-            -- don't include coins with negative wallets
+            -- don't include coins with negative wallets, these seem to be a result of dune's internal bugs for solana tokens
             where nw.negative_wallets = 0
+
         );
 
         select 'core.coin_wallet_transfers' as table
