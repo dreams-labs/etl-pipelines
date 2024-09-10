@@ -75,6 +75,7 @@ def rebuild_core_coin_wallet_transfers():
         truncate table core.coin_wallet_transfers;
 
         insert into core.coin_wallet_transfers (
+
             with exclusion_addresses as (
                 -- manual exclusions from https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=1863435581#gid=1863435581
                 select e.chain_text_source
@@ -110,7 +111,6 @@ def rebuild_core_coin_wallet_transfers():
                 from `reference.addresses_contracts` e
                 join `core.chains` ch on ch.chain_text_dune = e.blockchain
             ),
-
 
             coin_wallet_transfers_draft as (
                 -- create a draft of the output table that can be audited for inconsistencies
@@ -157,16 +157,12 @@ def rebuild_core_coin_wallet_transfers():
                 group by 1
             )
 
-            select count(*)
-            from  (
-
-
             select cwt.*
             from coin_wallet_transfers_draft cwt
             join negative_wallets_check nw on nw.coin_id = cwt.coin_id
-            -- don't include coins with negative wallets
+            -- don't include coins with negative wallets, these seem to be a result of dune's internal bugs for solana tokens
             where nw.negative_wallets = 0
-            )
+
         );
 
         select 'core.coin_wallet_transfers' as table
