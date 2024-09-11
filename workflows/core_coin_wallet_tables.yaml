@@ -13,12 +13,3 @@ main:
             auth:
                 type: OIDC
             timeout: 1800
-
-    - updateCoreWalletMetrics:
-        # update the coin.coin_wallet_metrics table
-        call: http.get
-        args:
-            url: https://core-coin-wallet-metrics-954736581165.us-west1.run.app
-            auth:
-                type: OIDC
-            timeout: 1800
