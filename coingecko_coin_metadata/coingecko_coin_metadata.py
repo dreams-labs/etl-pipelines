@@ -1,119 +1,44 @@
-import functions_framework
-import pandas as pd
+"""
+This module is designed to retrieve and store metadata for cryptocurrency tokens from Coingecko. 
+It consists of three interconnected functions:
+
+1. `retrieve_coingecko_metadata`: The main entry point that queries a list of tokens, attempts to 
+    fetch their metadata from Coingecko, and stores the results. It processes each token 
+    individually and manages rate-limiting between API calls.
+   
+2. `coingecko_metadata_search`: Called by `retrieve_coingecko_metadata`, this function attempts to
+    look up a token's metadata on Coingecko, stores the metadata in Google Cloud Storage (GCS), and
+    logs the results in BigQuery for future reference.
+
+3. `fetch_coingecko_data`: A helper function that handles the actual API call to Coingecko, 
+    including retrying in the event of rate limits (HTTP 429). This function is invoked by
+    `coingecko_metadata_search` to retrieve the metadata for each token.
+
+The three functions work together to ensure that token metadata is fetched, stored, and logged 
+efficiently while respecting Coingecko's API rate limits and handling errors gracefully.
+"""
 import time
 import datetime
 import logging
 import os
-import requests
 import json
+import requests
+import functions_framework
 from google.cloud import bigquery
 from google.cloud import storage
 from dreams_core.googlecloud import GoogleCloud as dgc
+import dreams_core.core as dc
 
+# set up logger at the module level
+logger = dc.setup_logger()
 
-def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
-    '''
-    Makes an API call to Coingecko and returns the response data.
-    Retries the call if a rate limit error (429) is encountered.
-
-    param: blockchain <string> this must match chain_text_coingecko from core.chains
-    param: address <string> token contract address
-    param: max_retries <int> number of times to retry on 429 error
-    param: retry_delay <int> delay in seconds between retries
-    returns: response_data <dict> JSON response data from Coingecko API
-    '''
-    coingecko_api_key = os.getenv('COINGECKO_API_KEY')
-    headers = {'x_cg_pro_api_key': coingecko_api_key}
-    url = f'https://api.coingecko.com/api/v3/coins/{blockchain}/contract/{address}'
-
-    for attempt in range(max_retries):
-        response = requests.get(url, headers=headers, timeout=30)
-        response_data = json.loads(response.text)
-
-        if 'status' in response_data and response_data['status'].get('error_code') == 429:
-            logging.info("Rate limit exceeded, retrying in %d seconds... (Attempt %d of %d)", retry_delay, attempt + 1, max_retries)
-            time.sleep(retry_delay)
-        else:
-            return response_data
-
-    logging.error("Max retries reached. Returning the last response data.")
-
-    return response_data
-
-
-def coingecko_metadata_search(blockchain, address, coin_id):
-    '''
-    Attempts to look up a coin on Coingecko and store its metadata in GCS.
-
-    param: blockchain <string> this must match chain_text_coingecko from core.chains
-    param: address <string> token contract address
-    param: coin_id <dataframe> core.coins.coin_id which is added to bigquery records
-    '''
-    # get logger
-    logger = logging.getLogger(__name__)
-
-    # get GCP credentials
-    credentials = dgc().credentials
-
-    # making the api call
-    response_data = fetch_coingecko_data(blockchain, address)
-
-    try:
-        coingecko_id = response_data['id']
-        search_successful = True
-        search_log = 'search successful'
-        logger.info('search successful for <%s:%s>', blockchain, address)
-    except:
-        coingecko_id = None
-        search_successful = False
-        search_log = str(response_data)
-        logger.info('FAILURE: search failed for <%s:%s>', blockchain, address)
-        logger.info('%s', str(response_data))
-
-    # storing json in gcs
-    if search_successful:
-        filepath = 'data_lake/coingecko_coin_metadata/'
-        filename = str(response_data['id'] + '.json')
-
-        client = storage.Client(credentials=credentials, project='dreams-labs-data')
-        bucket = client.get_bucket('dreams-labs-storage')
-
-        blob = bucket.blob(filepath + filename)
-        blob.upload_from_string(json.dumps(response_data), content_type='json')
-
-        logger.info('%s uploaded successfully', filename)
-
-    # store search result in etl_pipelines.coin_coingecko_ids
-    client = bigquery.Client(credentials=credentials, project='dreams-labs-data')
-    table_id = 'western-verve-411004.etl_pipelines.coin_coingecko_ids'
-
-    rows_to_insert = [{
-        'coin_id': coin_id,
-        'coingecko_id': coingecko_id,
-        'search_successful': search_successful,
-        'search_date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'search_log': search_log
-    }]
-
-    errors = client.insert_rows_json(table_id, rows_to_insert)  # Make an API request.
-    if errors == []:
-        logger.info("new row added to etl_pipelines.coin_coingecko_ids")
-    else:
-        logger.info("Encountered errors while inserting rows: {}".format(errors))
 
 
 @functions_framework.http
-def retrieve_coingecko_metadata(request):
+def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # noqa: F841
     '''
     pulls a list of coins that need metadata and attempts to match them and store metadata
     '''
-    # configure logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
-        datefmt='%d/%b/%Y %H:%M:%S'
-        )
-    logger = logging.getLogger(__name__)
 
     # pull list of coins to attempt
     query_sql = '''
@@ -153,3 +78,98 @@ def retrieve_coingecko_metadata(request):
         time.sleep(15)
 
     return "coingecko metadata update completed."
+
+
+
+def coingecko_metadata_search(blockchain, address, coin_id):
+    '''
+    Attempts to look up a coin on Coingecko and store its metadata in GCS.
+
+    param: blockchain <string> this must match chain_text_coingecko from core.chains
+    param: address <string> token contract address
+    param: coin_id <dataframe> core.coins.coin_id which is added to bigquery records
+    '''
+    # get GCP credentials
+    credentials = dgc().credentials
+
+    # making the api call
+    response_data = fetch_coingecko_data(blockchain, address)
+
+    try:
+        coingecko_id = response_data['id']
+        search_successful = True
+        search_log = 'search successful'
+        logger.info('search successful for <%s:%s>', blockchain, address)
+    except KeyError:
+        coingecko_id = None
+        search_successful = False
+        search_log = 'KeyError: ID not found in response data'
+        logger.info('FAILURE: KeyError - search failed for <%s:%s>', blockchain, address)
+    except (TypeError, AttributeError):
+        coingecko_id = None
+        search_successful = False
+        search_log = 'TypeError or AttributeError: Invalid response data'
+        logger.info('FAILURE: TypeError or AttributeError - search failed for <%s:%s>'
+                    , blockchain, address)
+
+    # storing json in gcs
+    if search_successful:
+        filepath = 'data_lake/coingecko_coin_metadata/'
+        filename = str(response_data['id'] + '.json')
+
+        client = storage.Client(credentials=credentials, project='dreams-labs-data')
+        bucket = client.get_bucket('dreams-labs-storage')
+
+        blob = bucket.blob(filepath + filename)
+        blob.upload_from_string(json.dumps(response_data), content_type='json')
+
+        logger.info('%s uploaded successfully', filename)
+
+    # store search result in etl_pipelines.coin_coingecko_ids
+    client = bigquery.Client(credentials=credentials, project='dreams-labs-data')
+    table_id = 'western-verve-411004.etl_pipelines.coin_coingecko_ids'
+
+    rows_to_insert = [{
+        'coin_id': coin_id,
+        'coingecko_id': coingecko_id,
+        'search_successful': search_successful,
+        'search_date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'search_log': search_log
+    }]
+
+    errors = client.insert_rows_json(table_id, rows_to_insert)  # Make an API request.
+    if not errors:
+        logger.info("new row added to etl_pipelines.coin_coingecko_ids")
+    else:
+        logger.info("Encountered errors while inserting rows: %s", errors)
+
+
+def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
+    '''
+    Makes an API call to Coingecko and returns the response data.
+    Retries the call if a rate limit error (429) is encountered.
+
+    param: blockchain <string> this must match chain_text_coingecko from core.chains
+    param: address <string> token contract address
+    param: max_retries <int> number of times to retry on 429 error
+    param: retry_delay <int> delay in seconds between retries
+    returns: response_data <dict> JSON response data from Coingecko API
+    '''
+    coingecko_api_key = os.getenv('COINGECKO_API_KEY')
+    headers = {'x_cg_pro_api_key': coingecko_api_key}
+    url = f'https://api.coingecko.com/api/v3/coins/{blockchain}/contract/{address}'
+
+    for attempt in range(max_retries):
+        response = requests.get(url, headers=headers, timeout=30)
+        response_data = json.loads(response.text)
+
+        if 'status' in response_data and response_data['status'].get('error_code') == 429:
+            logging.info("Rate limit exceeded, retrying in %d seconds... (Attempt %d of %d)",
+                         retry_delay, attempt + 1, max_retries)
+            time.sleep(retry_delay)
+        else:
+            return response_data
+
+    logging.error("Max retries reached. Returning the last response data.")
+
+    return response_data
