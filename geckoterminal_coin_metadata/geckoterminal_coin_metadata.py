@@ -65,7 +65,6 @@ def retrieve_coingecko_metadata(request):  # pylint: disable=unused-argument  # 
         and cgi.coin_id is null
         and cc.coingecko_id is null -- don't attempt coins that already have data from coingecko
         group by 1, 2, 3
-        limit 5
     '''
 
     update_queue_df = dgc().run_sql(query_sql)
