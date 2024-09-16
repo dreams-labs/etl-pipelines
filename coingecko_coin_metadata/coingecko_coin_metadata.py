@@ -37,7 +37,8 @@ logger = dc.setup_logger()
 @functions_framework.http
 def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # noqa: F841
     '''
-    pulls a list of coins that need metadata and attempts to match them and store metadata
+    Queries BigQuery to obtain a list of coins that need metadata and attempts to match them and 
+    store metadata by calling coingecko_metadata_search() for each. 
     '''
 
     # pull list of coins to attempt
@@ -83,7 +84,8 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
 
 def coingecko_metadata_search(blockchain, address, coin_id):
     '''
-    Attempts to look up a coin on Coingecko and store its metadata in GCS.
+    For a given blockchain and address, attempts to look up the coin on Coingecko by calling
+    fetch_coingecko_data(). If the search is successful, stores the metadata in GCS.
 
     param: blockchain <string> this must match chain_text_coingecko from core.chains
     param: address <string> token contract address
@@ -142,6 +144,7 @@ def coingecko_metadata_search(blockchain, address, coin_id):
         logger.info("new row added to etl_pipelines.coin_coingecko_ids")
     else:
         logger.info("Encountered errors while inserting rows: %s", errors)
+
 
 
 def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
