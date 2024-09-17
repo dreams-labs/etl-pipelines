@@ -62,10 +62,8 @@ def retrieve_coingecko_metadata(request):  # pylint: disable=unused-argument  # 
         left join `etl_pipelines.coin_geckoterminal_ids` cgi on cgi.coin_id = cc.coin_id
             and cgi.api_status_code <> 429 -- don't apply any filters based on api rate limit errors
         where cc.address is not null -- removes coins without addresses
-        and cgi.coin_id is null
-        and cc.coingecko_id is null -- don't attempt coins that already have data from coingecko
+        and cgi.coin_id is null -- removes coins that have already been searched for
         group by 1, 2, 3
-        limit 5
     '''
 
     update_queue_df = dgc().run_sql(query_sql)
