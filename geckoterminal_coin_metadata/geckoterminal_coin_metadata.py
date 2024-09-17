@@ -62,8 +62,10 @@ def retrieve_coingecko_metadata(request):  # pylint: disable=unused-argument  # 
         left join `etl_pipelines.coin_geckoterminal_ids` cgi on cgi.coin_id = cc.coin_id
             and cgi.api_status_code <> 429 -- don't apply any filters based on api rate limit errors
         where cc.address is not null -- removes coins without addresses
+        and ch.chain_text_geckoterminal is not null -- removes coins without geckoterminal chain aliases
         and cgi.coin_id is null -- removes coins that have already been searched for
         group by 1, 2, 3
+        limit 20
     '''
 
     update_queue_df = dgc().run_sql(query_sql)
@@ -144,8 +146,8 @@ def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, 
         }
 
         # File naming convention
-        filename_main = f"{response_data['data']['id']}.json"
-        filename_info = f"{response_data['data']['id']}.json"
+        filename_main = f"{response_data['data']['id']}_main.json"
+        filename_info = f"{response_data['data']['id']}_info.json"
 
         # Function to upload data to GCS
         def upload_to_gcs(data, filename, path):

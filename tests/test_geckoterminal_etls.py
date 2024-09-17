@@ -15,9 +15,8 @@ import json
 import pytest
 from dotenv import load_dotenv
 from dreams_core import core as dc
-import pytest
-from google.cloud import bigquery
 
+# project modules
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../geckoterminal_coin_metadata')))
 import geckoterminal_coin_metadata as gtm # type: ignore[reportMissingImports]
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../geckoterminal_parse_json')))
@@ -269,6 +268,9 @@ info_json_data_complete = {
 }
 
 def test_upload_metadata_complete():
+    """
+    Confirms that the correctly formatted rows were isnerted correctly
+    """
     # Mock BigQuery client
     mock_bq_client = MagicMock()
 
