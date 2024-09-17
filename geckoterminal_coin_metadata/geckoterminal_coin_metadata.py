@@ -90,7 +90,8 @@ def retrieve_coingecko_metadata(request):  # pylint: disable=unused-argument  # 
 def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, bigquery_client):
     '''
     For a given blockchain and address, attempts to look up the coin on Geckoterminal by calling
-    ping_geckoterminal_api() for both the main and info endpoints. If the search is successful, stores the metadata in GCS.
+    ping_geckoterminal_api() for both the main and info endpoints. If the search is successful,
+    stores the metadata in GCS.
 
     param: blockchain <string> this must match chain_text_geckoterminal from core.chains
     param: address <string> token contract address
@@ -116,7 +117,8 @@ def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, 
     # Step 2: Handle API Responses
     if status_code == 429 or info_status_code == 429:
         search_data['search_log'] = 'Rate limit exceeded (429), retrying later'
-        logger.warning('Rate limit (429) encountered for <%s:%s>. Will retry later.', blockchain, address)
+        logger.warning('Rate limit (429) encountered for <%s:%s>. Will retry later.',
+                       blockchain, address)
     else:
         try:
             search_data['geckoterminal_id'] = response_data['data']['id']
@@ -128,7 +130,8 @@ def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, 
             logger.info('FAILURE: KeyError - search failed for <%s:%s>', blockchain, address)
         except (TypeError, AttributeError):
             search_data['search_log'] = 'TypeError or AttributeError: Invalid response data'
-            logger.info('FAILURE: TypeError or AttributeError - search failed for <%s:%s>', blockchain, address)
+            logger.info('FAILURE: TypeError or AttributeError - search failed for <%s:%s>',
+                        blockchain, address)
 
     # Step 3: Store metadata in Google Cloud Storage (GCS) if the search is successful
     if search_data['search_successful']:
@@ -136,13 +139,13 @@ def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, 
 
         # Define paths for main and info endpoint data
         paths = {
-            'main': 'data_lake/geckoterminal_coin_metadata/',
+            'main': 'data_lake/geckoterminal_coin_metadata_main/',
             'info': 'data_lake/geckoterminal_coin_metadata_info/'
         }
 
         # File naming convention
-        filename_main = f"{response_data['data']['id']}_main.json"
-        filename_info = f"{response_data['data']['id']}_info.json"
+        filename_main = f"{response_data['data']['id']}.json"
+        filename_info = f"{response_data['data']['id']}.json"
 
         # Function to upload data to GCS
         def upload_to_gcs(data, filename, path):

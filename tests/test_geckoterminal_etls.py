@@ -10,15 +10,18 @@ tests used to audit the files in the etl-pipelines repository
 
 import sys
 import os
-from unittest.mock import patch, Mock
+from unittest.mock import patch, Mock, MagicMock
 import json
 import pytest
 from dotenv import load_dotenv
 from dreams_core import core as dc
-
+import pytest
+from google.cloud import bigquery
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../geckoterminal_coin_metadata')))
 import geckoterminal_coin_metadata as gtm # type: ignore[reportMissingImports]
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../geckoterminal_parse_json')))
+import geckoterminal_parse_json as gpj # type: ignore[reportMissingImports]
 
 load_dotenv()
 logger = dc.setup_logger()
@@ -230,3 +233,68 @@ def test_ping_geckoterminal_api_error_response(mock_get, api_params, mock_error_
 
     # Verify that the API was called only once (no retries)
     mock_get.assert_called_once()
+
+
+# ---------------------------------------- #
+# geckoterminal_parse_json() unit tests
+# ---------------------------------------- #
+
+# Sample main and info JSON data for normal case
+main_json_data_complete = {
+    'data': {
+        'id': 'avax_0x024e12c5c75dfbd75ea4bd2df5d11984836d6ac5',
+        'attributes': {
+            'total_supply': '72000000000000000000000000000000.0'
+        },
+        'relationships': {
+            'top_pools': {
+                'data': [{'id': 'avax_0x6e9980ba9430030da896d8fdebf53bb8029d2494', 'type': 'pool'}]
+            }
+        }
+    }
+}
+
+info_json_data_complete = {
+    'data': {
+        'attributes': {
+            'name': 'PERRY',
+            'symbol': 'PRY',
+            'address': '0x024e12c5c75dfbd75ea4bd2df5d11984836d6ac5',
+            'decimals': 18,
+            'image_url': 'missing.png',
+            'websites': [],
+            'gt_score': 46.97
+        }
+    }
+}
+
+def test_upload_metadata_complete():
+    # Mock BigQuery client
+    mock_bq_client = MagicMock()
+
+    # Call the function to test
+    gpj.upload_metadata(main_json_data_complete, info_json_data_complete, mock_bq_client)
+
+    # Check if the BigQuery insert method was called once with expected data
+    mock_bq_client.insert_rows_json.assert_called_once()
+    rows = mock_bq_client.insert_rows_json.call_args[0][1]
+
+    assert rows[0]['main_json_status'] == 'success'
+    assert rows[0]['info_json_status'] == 'success'
+    assert rows[0]['overall_status'] == 'complete'
+    assert rows[0]['error_message'] is None
+
+# Sample main JSON data, with info_json_data being None (missing)
+main_json_data_only = {
+    'data': {
+        'id': 'avax_0x024e12c5c75dfbd75ea4bd2df5d11984836d6ac5',
+        'attributes': {
+            'total_supply': '72000000000000000000000000000000.0'
+        },
+        'relationships': {
+            'top_pools': {
+                'data': [{'id': 'avax_0x6e9980ba9430030da896d8fdebf53bb8029d2494', 'type': 'pool'}]
+            }
+        }
+    }
+}

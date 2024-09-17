@@ -1,0 +1,5 @@
+google-cloud-storage==2.7.0
+google-cloud-bigquery==3.4.0
+functions-framework==3.1.0
+dreams-core==0.2.22
+concurrent==1.0.0  # For ThreadPoolExecutor, part of Python’s standard library but may require this for cloud compatibility
