@@ -10,10 +10,10 @@ tests used to audit the files in the etl-pipelines repository
 
 import sys
 import os
-from dotenv import load_dotenv
-import pytest
-import json
 from unittest.mock import patch, Mock
+import json
+import pytest
+from dotenv import load_dotenv
 from dreams_core import core as dc
 
 
@@ -38,7 +38,7 @@ logger = dc.setup_logger()
 def api_params():
     """
     Fixture to provide valid API parameters for testing.
-    
+
     Returns:
         dict: A dictionary containing valid blockchain and address values.
     """
@@ -51,7 +51,7 @@ def api_params():
 def mock_successful_response():
     """
     Fixture to create a mock successful API response.
-    
+
     Returns:
         Mock: A mock object simulating a successful requests.Response.
     """
@@ -72,13 +72,13 @@ def mock_successful_response():
 
 @pytest.mark.unit
 @patch('geckoterminal_coin_metadata.requests.get')
-def test_fetch_geckoterminal_data_successful(mock_get, api_params, mock_successful_response):
+def test_ping_geckoterminal_api_successful(mock_get, api_params, mock_successful_response):
     """
-    Test the fetch_geckoterminal_data function for a successful API call.
-    
+    Test the ping_geckoterminal_api function for a successful API call.
+
     This test verifies that the function correctly handles a successful API response,
     returns the expected data, and doesn't attempt any retries.
-    
+
     Args:
         mock_get (MagicMock): Mocked requests.get function.
         api_params (dict): Fixture providing API parameters.
@@ -88,8 +88,8 @@ def test_fetch_geckoterminal_data_successful(mock_get, api_params, mock_successf
     mock_get.return_value = mock_successful_response
 
     # Act
-    response_data, status_code = gtm.fetch_geckoterminal_data(
-        api_params['blockchain'], 
+    response_data, status_code = gtm.ping_geckoterminal_api(
+        api_params['blockchain'],
         api_params['address']
     )
 
@@ -109,7 +109,7 @@ def test_fetch_geckoterminal_data_successful(mock_get, api_params, mock_successf
 def mock_rate_limited_response():
     """
     Fixture to create a mock rate-limited API response.
-    
+
     Returns:
         Mock: A mock object simulating a rate-limited requests.Response.
     """
@@ -122,7 +122,7 @@ def mock_rate_limited_response():
 def mock_error_response():
     """
     Fixture to create a mock error API response.
-    
+
     Returns:
         Mock: A mock object simulating an error requests.Response.
     """
@@ -134,13 +134,13 @@ def mock_error_response():
 @pytest.mark.unit
 @patch('geckoterminal_coin_metadata.requests.get')
 @patch('geckoterminal_coin_metadata.time.sleep')
-def test_fetch_geckoterminal_data_rate_limit_success(mock_sleep, mock_get, api_params, mock_rate_limited_response, mock_successful_response):
+def test_ping_geckoterminal_api_rate_limit_success(mock_sleep, mock_get, api_params, mock_rate_limited_response, mock_successful_response):
     """
-    Test the fetch_geckoterminal_data function for a rate-limited API call that succeeds on retry.
-    
+    Test the ping_geckoterminal_api function for a rate-limited API call that succeeds on retry.
+
     This test verifies that the function correctly handles a rate-limited response,
     retries the request, and succeeds on the second attempt.
-    
+
     Args:
         mock_sleep (MagicMock): Mocked time.sleep function.
         mock_get (MagicMock): Mocked requests.get function.
@@ -152,8 +152,8 @@ def test_fetch_geckoterminal_data_rate_limit_success(mock_sleep, mock_get, api_p
     mock_get.side_effect = [mock_rate_limited_response, mock_successful_response]
 
     # Act
-    response_data, status_code = gtm.fetch_geckoterminal_data(
-        api_params['blockchain'], 
+    response_data, status_code = gtm.ping_geckoterminal_api(
+        api_params['blockchain'],
         api_params['address']
     )
 
@@ -169,13 +169,13 @@ def test_fetch_geckoterminal_data_rate_limit_success(mock_sleep, mock_get, api_p
 @pytest.mark.unit
 @patch('geckoterminal_coin_metadata.requests.get')
 @patch('geckoterminal_coin_metadata.time.sleep')
-def test_fetch_geckoterminal_data_max_retries_exceeded(mock_sleep, mock_get, api_params, mock_rate_limited_response):
+def test_ping_geckoterminal_api_max_retries_exceeded(mock_sleep, mock_get, api_params, mock_rate_limited_response):
     """
-    Test the fetch_geckoterminal_data function when max retries are exceeded.
-    
+    Test the ping_geckoterminal_api function when max retries are exceeded.
+
     This test verifies that the function correctly handles multiple rate-limited responses,
     retries the maximum number of times, and returns the last rate-limited response.
-    
+
     Args:
         mock_sleep (MagicMock): Mocked time.sleep function.
         mock_get (MagicMock): Mocked requests.get function.
@@ -186,7 +186,7 @@ def test_fetch_geckoterminal_data_max_retries_exceeded(mock_sleep, mock_get, api
     mock_get.return_value = mock_rate_limited_response
 
     # Act
-    response_data, status_code = gtm.fetch_geckoterminal_data(
+    response_data, status_code = gtm.ping_geckoterminal_api(
         api_params['blockchain'],
         api_params['address']
     )
@@ -202,13 +202,13 @@ def test_fetch_geckoterminal_data_max_retries_exceeded(mock_sleep, mock_get, api
 
 @pytest.mark.unit
 @patch('geckoterminal_coin_metadata.requests.get')
-def test_fetch_geckoterminal_data_error_response(mock_get, api_params, mock_error_response):
+def test_ping_geckoterminal_api_error_response(mock_get, api_params, mock_error_response):
     """
-    Test the fetch_geckoterminal_data function for an error API response.
-    
+    Test the ping_geckoterminal_api function for an error API response.
+
     This test verifies that the function correctly handles an error response
     and returns the error data without attempting retries.
-    
+
     Args:
         mock_get (MagicMock): Mocked requests.get function.
         api_params (dict): Fixture providing API parameters.
@@ -218,8 +218,8 @@ def test_fetch_geckoterminal_data_error_response(mock_get, api_params, mock_erro
     mock_get.return_value = mock_error_response
 
     # Act
-    response_data, status_code = gtm.fetch_geckoterminal_data(
-        api_params['blockchain'], 
+    response_data, status_code = gtm.ping_geckoterminal_api(
+        api_params['blockchain'],
         api_params['address']
     )
 

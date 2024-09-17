@@ -65,6 +65,7 @@ def retrieve_coingecko_metadata(request):  # pylint: disable=unused-argument  # 
         and cgi.coin_id is null
         and cc.coingecko_id is null -- don't attempt coins that already have data from coingecko
         group by 1, 2, 3
+        limit 5
     '''
 
     update_queue_df = dgc().run_sql(query_sql)
@@ -91,7 +92,7 @@ def retrieve_coingecko_metadata(request):  # pylint: disable=unused-argument  # 
 def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, bigquery_client):
     '''
     For a given blockchain and address, attempts to look up the coin on Geckoterminal by calling
-    fetch_geckoterminal_data(). If the search is successful, stores the metadata in GCS.
+    ping_geckoterminal_api() for both the main and info endpoints. If the search is successful, stores the metadata in GCS.
 
     param: blockchain <string> this must match chain_text_geckoterminal from core.chains
     param: address <string> token contract address
@@ -99,8 +100,9 @@ def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, 
     param: storage_client <google.cloud.storage.Client> GCS client object for storage
     param: bigquery_client <google.cloud.bigquery.Client> BigQuery client object
     '''
-    # Step 1: API Call
-    response_data, status_code = fetch_geckoterminal_data(blockchain, address)
+    # Step 1: API Call for main and info endpoints
+    response_data, status_code = ping_geckoterminal_api(blockchain, address)
+    info_response_data, info_status_code = ping_geckoterminal_api(blockchain, address, info=True)
 
     # Initialize the data for BigQuery and logging
     search_data = {
@@ -108,15 +110,15 @@ def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, 
         'geckoterminal_id': None,
         'search_successful': False,
         'api_status_code': status_code,
+        'info_api_status_code': info_status_code,
         'search_log': '',
         'search_date': datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     }
 
-    # Step 2: Handle API Response
-    if status_code == 429:
+    # Step 2: Handle API Responses
+    if status_code == 429 or info_status_code == 429:
         search_data['search_log'] = 'Rate limit exceeded (429), retrying later'
-        logger.warning('Rate limit (429) encountered for <%s:%s>. Will retry later.'
-                       , blockchain, address)
+        logger.warning('Rate limit (429) encountered for <%s:%s>. Will retry later.', blockchain, address)
     else:
         try:
             search_data['geckoterminal_id'] = response_data['data']['id']
@@ -128,27 +130,36 @@ def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, 
             logger.info('FAILURE: KeyError - search failed for <%s:%s>', blockchain, address)
         except (TypeError, AttributeError):
             search_data['search_log'] = 'TypeError or AttributeError: Invalid response data'
-            logger.info('FAILURE: TypeError or AttributeError - search failed for <%s:%s>'
-                        , blockchain, address)
+            logger.info('FAILURE: TypeError or AttributeError - search failed for <%s:%s>', blockchain, address)
 
-    # Step 3: Store metadata in Google Cloud Storage (GCS)
+    # Step 3: Store metadata in Google Cloud Storage (GCS) if the search is successful
     if search_data['search_successful']:
-        filepath = 'data_lake/geckoterminal_coin_metadata/'
-        filename = f"{response_data['data']['id']}.json"
-
-        # Use the passed storage_client instead of reinitializing it
         bucket = storage_client.get_bucket('dreams-labs-storage')
-        blob = bucket.blob(filepath + filename)
-        blob.upload_from_string(json.dumps(response_data), content_type='application/json')
 
-        logger.info('%s uploaded successfully', filename)
+        # Define paths for main and info endpoint data
+        paths = {
+            'main': 'data_lake/geckoterminal_coin_metadata/',
+            'info': 'data_lake/geckoterminal_coin_metadata_info/'
+        }
+
+        # File naming convention
+        filename_main = f"{response_data['data']['id']}_main.json"
+        filename_info = f"{response_data['data']['id']}_info.json"
+
+        # Function to upload data to GCS
+        def upload_to_gcs(data, filename, path):
+            blob = bucket.blob(path + filename)
+            blob.upload_from_string(json.dumps(data), content_type='application/json')
+            logger.info('%s uploaded successfully', filename)
+
+        # Upload both main and info data
+        upload_to_gcs(response_data, filename_main, paths['main'])
+        upload_to_gcs(info_response_data, filename_info, paths['info'])
 
     # Step 4: Log search results in BigQuery
     table_id = 'western-verve-411004.etl_pipelines.coin_geckoterminal_ids'
-
-    # Use the passed bigquery_client instead of reinitializing it
     rows_to_insert = [search_data]
-    errors = bigquery_client.insert_rows_json(table_id, rows_to_insert)  # Make an API request.
+    errors = bigquery_client.insert_rows_json(table_id, rows_to_insert)
 
     if not errors:
         logger.debug("New row added to etl_pipelines.coin_geckoterminal_ids")
@@ -156,19 +167,22 @@ def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, 
         logger.debug("Encountered errors while inserting rows: %s", errors)
 
 
-
-def fetch_geckoterminal_data(blockchain, address, max_retries=3, retry_delay=30):
+def ping_geckoterminal_api(blockchain, address, max_retries=3, retry_delay=30, info=False):
     '''
     Makes an API call to Geckoterminal and returns the response data and status code.
+    Supports the main token endpoint and the info endpoint based on the info parameter.
     Retries the call if a rate limit error (429) is encountered.
 
     param: blockchain <string> this must match chain_text_geckoterminal from core.chains
     param: address <string> token contract address
     param: max_retries <int> number of times to retry on 429 error
     param: retry_delay <int> delay in seconds between retries
+    param: info <bool> whether to call the /info endpoint or the main token endpoint
     returns: tuple(response_data, status_code) JSON response data and API status code
     '''
-    url = f'https://api.geckoterminal.com/api/v2/networks/{blockchain}/tokens/{address}'
+    # Use the appropriate URL based on the info parameter
+    base_url = f'https://api.geckoterminal.com/api/v2/networks/{blockchain}/tokens/{address}'
+    url = f'{base_url}/info' if info else base_url
 
     for attempt in range(max_retries):
         response = requests.get(url, timeout=30)
