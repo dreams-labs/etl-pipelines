@@ -7,3 +7,8 @@ __pycache__/
 
 # other local files
 .DS_Store
+
+# dbt artifacts
+logs/dbt.log
+dbt_dreamsdata/logs
+dbt_dreamsdata/target
