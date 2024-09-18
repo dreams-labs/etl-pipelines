@@ -3,10 +3,10 @@ version: 2
 
 models:
   - name: core_coins
-    description: "Core coins table"
+    description: "core.coins table"
     columns:
       - name: coin_id
         description: "Unique ID for each coin"
-        tests:
+        data_tests:
           - not_null
           - unique

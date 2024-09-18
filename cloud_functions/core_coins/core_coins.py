@@ -1,12 +1,6 @@
 '''
 cloud function that runs a query to refresh the data in bigquery table core.coins
 '''
-import datetime
-import time
-import logging
-import os
-from pytz import utc
-import pandas as pd
 import functions_framework
 import dreams_core.core as dc
 from dreams_core.googlecloud import GoogleCloud as dgc
@@ -18,29 +12,29 @@ logger = dc.setup_logger()
 @functions_framework.http
 def update_core_coins(request):
     '''
-    updates core.coins by adding new records from calls and dune, then refreshing the core.coins table. 
-    even if there are no new coins added the table should still be refreshed to make updates to new 
-    data connections, such as new coingecko_ids, market data, etc. 
+    updates core.coins by adding new records from calls and dune, then refreshing the core.coins
+    table. even if there are no new coins added the table should still be refreshed to reflect
+    updates to new data connections, such as new coingecko_ids, market data, etc.
     '''
     # Get query parameter to control whether to intake new coins or to just rebuild core.coins
     intake_new_coins = request.args.get('intake_new_coins', 'true').lower()
 
     # intake new coins if instructed to do so
     if intake_new_coins == 'true':
-        logger.info(f"ingesting new coins to etl_pipelines.coin_intake...")
+        logger.info("ingesting new coins to etl_pipelines.coin_intake...")
 
         # load new community calls into bigquery
         refresh_community_calls_table()
 
         # add new coins in the etl_pipelines.community_calls to etl_pipelines.coins_intake
         intake_new_community_calls_coins()
-    
+
         # add new coins with wallet transfer data from the whale chart function
         intake_new_wallet_transfer_coins()
 
-    
+
     # refresh core.coins, logging the number of coins before and after the refresh
-    logger.info(f"rebuilding core.coins table...")
+    logger.info("rebuilding core.coins table...")
     calls_coins_old,dune_coins_old,other_coins_old = check_coin_counts()
     refresh_core_coins()
     calls_coins,dune_coins,other_coins = check_coin_counts()
@@ -52,22 +46,24 @@ def update_core_coins(request):
     total_coins = calls_coins + dune_coins + other_coins
     total_new_coins = new_calls + new_dune + new_other
 
-    logger.info(f"refreshed core.coins to {total_coins} total records.")
-    logger.info(f"{new_calls} new coins added from community calls.")
-    logger.info(f"{new_dune} new coins added from dune wallet transfer data.")
-    logger.info(f"{new_other} new coins added from other sources.")
+    logger.info("refreshed core.coins to %s total records.", total_coins)
+    logger.info("%s new coins added from community calls.", new_calls)
+    logger.info("%s new coins added from dune wallet transfer data.", new_dune)
+    logger.info("%s new coins added from other sources.", new_other)
 
-    return f'{{"finished updating core.coins to {total_coins} records ({total_new_coins} newly added)"}}'
+    outcome = ('{"finished updating core.coins to %s records (%s newly added)"}'
+                % (total_coins, total_new_coins))
 
+    return outcome
 
 
 def refresh_community_calls_table():
     '''
-    refreshes the etl_pipelines.community_calls bigquery table by uploading the gcs_export tab 
+    refreshes the etl_pipelines.community_calls bigquery table by uploading the gcs_export tab
         in the Community Calls google sheet
     '''
     # read the community calls gcs_export tab as a df
-    # link: https://docs.google.com/spreadsheets/d/1X6AJWBJHisADvyqoXwEvTPi1JSNReVU_woNW32Hz_yQ/edit?pli=1&gid=1640621634
+    # link: https://docs.google.com/spreadsheets/d/1X6AJWBJHisADvyqoXwEvTPi1JSNReVU_woNW32Hz_yQ/edit?pli=1&gid=1640621634 # pylint: disable=C0301
     df = dgc().read_google_sheet('1X6AJWBJHisADvyqoXwEvTPi1JSNReVU_woNW32Hz_yQ','gcs_export!A:H')
 
     # use the df to refresh the etl_pipelines.community_calls table
@@ -81,7 +77,7 @@ def refresh_community_calls_table():
 
 def intake_new_community_calls_coins():
     '''
-    ingests new coins from the etl_pipelines.community_calls table into the 
+    ingests new coins from the etl_pipelines.community_calls table into the
     etl_pipelines.coins_intake table through the following steps:
         1. normalizes coin addresses and chains
         2. checks for duplicates and coins that have already been ingested
@@ -147,7 +143,7 @@ def intake_new_community_calls_coins():
 
 def intake_new_wallet_transfer_coins():
     '''
-    ingests new coins from the etl_pipelines.coin_wallet_net_transfers table into the 
+    ingests new coins from the etl_pipelines.coin_wallet_net_transfers table into the
     etl_pipelines.coins_intake table through the following steps:
         1. normalizes coin addresses and chains
         2. checks for duplicates and coins that have already been ingested
@@ -176,7 +172,7 @@ def intake_new_wallet_transfer_coins():
                 ,chain_text_source as blockchain
                 ,data_source
                 ,min(data_updated_at) as source_date
-                from `etl_pipelines.coin_wallet_net_transfers` 
+                from `etl_pipelines.coin_wallet_net_transfers`
                 group by 1,2,3
             ) c
             left join `reference.chain_nicknames` chn on lower(chn.chain_reference) = lower(c.blockchain)
@@ -192,7 +188,7 @@ def intake_new_wallet_transfer_coins():
             left join etl_pipelines.coins_intake c on c.address = ac.address and c.chain_id = ac.chain_id
         )
 
-        -- select 
+        -- select
         -- case when record_count > 1 then 1 else 0 end as is_dupe
         -- ,already_ingested
         -- ,count(coin_id)
@@ -250,7 +246,7 @@ def refresh_core_coins():
             ,case when cwt.coin_id is not null then TRUE else FALSE end as has_wallet_transfer_data
             ,ci.created_at
             from etl_pipelines.coins_intake ci
-            left join `core.coin_facts_coingecko` cfcg on cfcg.coin_id = ci.coin_id
+            left join `core.coin_facts_metadata` cfcg on cfcg.coin_id = ci.coin_id
             left join (
                 select coin_id
                 from core.coin_market_data
@@ -258,10 +254,10 @@ def refresh_core_coins():
             ) cmd on cmd.coin_id = ci.coin_id
             left join (
                 select coin_id
-                from core.coin_wallet_transfers 
+                from core.coin_wallet_transfers
                 group by 1
             ) cwt on cwt.coin_id = ci.coin_id
-            where has_valid_chain = True   
+            where has_valid_chain = True
         )
         '''
 

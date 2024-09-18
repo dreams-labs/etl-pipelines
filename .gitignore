@@ -1,4 +1,5 @@
 # Byte-compiled / optimized files
+.pytest_cache/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -9,10 +10,7 @@ __pycache__/
 # other local files
 .DS_Store
 
-
-
-
-# Ignore compiled SQL and generated models from dbt_dreamsdata
-/dbt_dreamsdata/target/
-# Ignore logs generated during dbt runs in dbt_dreamsdata
-/dbt_dreamsdata/logs/
+# dbt artifacts
+logs/dbt.log
+dbt_dreamsdata/logs
+dbt_dreamsdata/target
