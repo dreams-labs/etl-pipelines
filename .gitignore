@@ -1,4 +1,5 @@
 # Byte-compiled / optimized files
+.pytest_cache/
 __pycache__/
 *.py[cod]
 
