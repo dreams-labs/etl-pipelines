@@ -58,9 +58,9 @@ def parse_coingecko_json(request):  # pylint: disable=unused-argument  # noqa: F
     # extract the json data and upload it to the corresponding bigquery tables
     for coin in coins_to_process:
         json_data = fetch_coin_json(coin, storage_client)
-        upload_metadata(json_data, bigquery_client)
-        upload_categories(json_data, bigquery_client)
         upload_contracts(json_data, bigquery_client)
+        upload_categories(json_data, bigquery_client)
+        upload_metadata(json_data, bigquery_client)
 
 
     return f"coingecko json parsing complete. processed {len(coins_to_process)} coins."
@@ -145,14 +145,19 @@ def upload_metadata(json_data, bigquery_client):
     insert_rows(bigquery_client, table_id, rows_to_insert)
 
 
-def upload_categories(json_data,bigquery_client):
+def upload_categories(json_data, bigquery_client):
     """
     Extracts and uploads categories to BigQuery.
     """
     table_id = 'western-verve-411004.etl_pipelines.coin_coingecko_categories'
     updated_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    categories = json_data['categories']
+    # Check if 'categories' exists and is not empty
+    categories = json_data.get('categories', [])
+    if not categories:
+        logger.info("No categories found for coingecko_id: %s", json_data['id'])
+        return  # Exit early if no categories to process
+
     rows_to_insert = [
         {
             'coingecko_id': json_data['id'],

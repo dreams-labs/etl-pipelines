@@ -16,85 +16,47 @@ def rebuild_coin_facts_metadata(request):  # pylint: disable=unused-argument  # 
     '''
 
     query_sql = '''
-        CREATE OR REPLACE TABLE `core.coin_facts_metadata` AS (
-
-        WITH
-        -- CTE to pull and rank rows from coin_geckoterminal_metadata
-        prep_geckoterminal_metadata AS (
         SELECT
-            coingecko_coin_id as coingecko_id,
-            description,
-            websites,
-            gt_score,
-            discord_url,
-            telegram_handle,
-            twitter_handle,
-            row_number() OVER (PARTITION BY coingecko_coin_id ORDER BY retrieval_date DESC) AS rn
-        FROM etl_pipelines.coin_geckoterminal_metadata
-        ),
+            COALESCE(cg.coin_id, gt.coin_id) AS coin_id,
+            COALESCE(cg.coingecko_id, gt.coingecko_coin_id) AS coingecko_id,
+            gt.geckoterminal_id,
+            COALESCE(cg.symbol, gt.symbol) AS symbol,
+            COALESCE(cg.name, gt.name) AS name,
 
-        -- CTE to select only the latest metadata entry per coingecko_id
-        latest_geckoterminal_metadata AS (
-        SELECT
-            coingecko_id,
-            description,
-            websites,
-            gt_score,
-            discord_url,
-            telegram_handle,
-            twitter_handle
-        FROM prep_geckoterminal_metadata
-        WHERE rn = 1
-        ),
+            -- Coalesce with logic to prevent 0 values from overwriting non-zero values
+            CASE
+                WHEN cg.total_supply IS NOT NULL AND cg.total_supply != 0 THEN cg.total_supply
+                ELSE gt.total_supply
+            END AS total_supply,
 
-        -- CTE to pull data from core.coin_facts_coingecko
-        core_coin_facts AS (
-        SELECT
-            coin_id,
-            coingecko_id,
-            symbol,
-            name,
-            homepage,
-            twitter_screen_name,
-            telegram_channel_identifier,
-            total_supply,
-            max_supply,
-            circulating_supply,
-            updated_at,
-            blockchain,
-            address,
-            decimals,
-            category
-        FROM core.coin_facts_coingecko
-        )
+            CASE
+                WHEN cg.decimals IS NOT NULL AND cg.decimals != 0 THEN cg.decimals
+                ELSE gt.decimals
+            END AS decimals,
 
-        SELECT
-        core.coin_id,
-        core.coingecko_id,
-        core.symbol,
-        core.name,
-        core.homepage,
-        core.twitter_screen_name,
-        core.telegram_channel_identifier,
-        core.total_supply,
-        core.max_supply,
-        core.circulating_supply,
-        core.updated_at AS core_updated_at,
-        core.blockchain,
-        core.address,
-        core.decimals,
-        core.category,
-        gt.description,
-        gt.websites,
-        gt.gt_score,
-        gt.discord_url,
-        gt.telegram_handle,
-        gt.twitter_handle
-        FROM core_coin_facts core
-        LEFT JOIN latest_geckoterminal_metadata gt
-        ON core.coingecko_id = gt.coingecko_id
+            COALESCE(cg.description, gt.description) AS description,
 
-        )
+            -- Keep fields exclusive to Table 1
+            gt.gt_score,
+            gt.websites,
+            gt.top_pools,
+
+            -- Coalescing Twitter handle fields
+            COALESCE(cg.twitter_screen_name, gt.twitter_handle) AS twitter_handle,
+
+            -- Coalescing Telegram handle fields
+            COALESCE(cg.telegram_channel_identifier, gt.telegram_handle) AS telegram_handle,
+
+            -- Data lineage booleans
+            CASE WHEN cg.coin_id IS NOT NULL THEN TRUE ELSE FALSE END AS has_coingecko_metadata,
+            CASE WHEN gt.coin_id IS NOT NULL THEN TRUE ELSE FALSE END AS has_geckoterminal_metadata
+
+        FROM
+            core.coin_facts_coingecko cg
+        FULL OUTER JOIN
+            etl_pipelines.coin_geckoterminal_metadata gt
+        ON
+            cg.coin_id = gt.coin_id
         '''
 
     dgc().run_sql(query_sql)
