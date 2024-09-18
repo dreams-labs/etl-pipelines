@@ -85,8 +85,6 @@ def intake_new_community_calls_coins():
     '''
 
     query_sql = '''
-        insert into etl_pipelines.coins_intake (
-
         with all_calls as (
             select generate_uuid() as coin_id
             ,c.blockchain as chain_input
@@ -134,7 +132,8 @@ def intake_new_community_calls_coins():
         -- don't add calls that share a normalized chain+address with existing coins
         and already_ingested = 0
 
-        )
+        -- don't add calls with invalid chain values
+        and has_valid_chain = True
         '''
 
     dgc().run_sql(query_sql)
