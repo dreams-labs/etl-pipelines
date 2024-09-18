@@ -67,7 +67,7 @@ def update_coin_market_data_coingecko(request):  # pylint: disable=unused-argume
             logger.error('Network error while retrieving data for %s: %s', coingecko_id, req_err)
         except ValueError as val_err:
             logger.error('Data processing error for %s: %s', coingecko_id, val_err)
-        except Exception as e: # pylint: ignore=W0718
+        except Exception as e: # pylint: disable=W0718
             logger.error('Unexpected error occurred for coingecko_id %s: %s', coingecko_id, str(e))
             logger.debug('Stack trace: ', exc_info=True)
 
