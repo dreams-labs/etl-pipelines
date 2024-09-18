@@ -1,20 +1,79 @@
+"""
+update geckoterminal market data
+"""
 import datetime
 import requests
 import pandas as pd
+import functions_framework
+import dreams_core.core as dc
+from dreams_core.googlecloud import GoogleCloud as dgc
+
+# set up logger at the module level
+logger = dc.setup_logger()
+
+# Main code sequence
+@functions_framework.http
+def update_geckoterminal_market_data(request):  # pylint: disable=unused-argument  # noqa: F841
+    """
+    update the market data
+    """
+    # Read the updates_df CSV file
+    updates_df = retrieve_updates_df()
+
+    # Retrieve all blockchain/address pairs
+    all_blockchain_address_pairs = retrieve_all_pairs(updates_df)
+
+    # Retrieve all pool addresses for the blockchain/address pairs
+    all_pairs_with_pools = retrieve_all_pool_addresses(all_blockchain_address_pairs)
+
+    # Add OHLCV data from pools and current time
+    for pair in all_pairs_with_pools:
+        ohlcv_data = retrieve_data_from_pool(pair[0], pair[2])
+        pair.extend([ohlcv_data[0], ohlcv_data[1], ohlcv_data[2], get_current_time()])
+
+    # Create a DataFrame from the updated list
+    info_df = pd.DataFrame(
+        all_pairs_with_pools,
+        columns=['chain', 'address', 'pool_address', 'date', 'price', 'volume', 'updated_at']
+    )
+
+    # Define the data types for the DataFrame
+    dtypes = {
+        'chain': 'object',
+        'address': 'object',
+        'pool_address': 'object',
+        'date': 'object',
+        'price': 'object',
+        'volume': 'object',
+        'updated_at': 'object'
+    }
+
+    # Apply the data types to the DataFrame
+    info_df = info_df.astype(dtypes)
+
+    # Merge the new data with the original updates DataFrame
+    updates_df = pd.merge(updates_df, info_df, on='address', how='left')
+
+    # Drop the 'chain' column as it is no longer needed
+    updates_df = updates_df.drop('chain', axis=1)
+
+    return 'all done'
+
+
 from dreams_core.googlecloud import GoogleCloud as dgc
 
 
 def retrieve_updates_df():
-    """
+    '''
     pulls a list of tokens in need of a geckoterminal market data update. this is defined as \
         coins that don't have coingecko_ids and that either have no market data or whose market \
         data is 2+ days out of date.
 
     returns:
         updates_df (dataframe): list of tokens that need market data updates
-    """
+    '''
 
-    query_sql = """
+    query_sql = '''
         with geckoterminal_data_status as (
             select c.coin_id
             ,ch.chain_text_geckoterminal
@@ -39,11 +98,15 @@ def retrieve_updates_df():
             ds.most_recent_record is null
             or ds.most_recent_record < (current_date('UTC') - 1)
         )
-        """
+        '''
 
     updates_df = dgc().run_sql(query_sql)
 
     return updates_df
+
+
+updates_df = retrieve_updates_df()
+
 
 
 # Function to retrieve the pool address for a given blockchain and token address
@@ -73,7 +136,6 @@ def retrieve_pool_address(blockchain, address):
     except requests.RequestException:
         return "couldn't retrieve the pool address"
 
-
 # Function to retrieve all pool addresses for a list of blockchain/address pairs
 def retrieve_all_pool_addresses(all_blockchain_address_pairs):
     """
@@ -93,7 +155,6 @@ def retrieve_all_pool_addresses(all_blockchain_address_pairs):
         all_pairs_with_pools.append(pair)
 
     return all_pairs_with_pools
-
 
 # Function to extract blockchain/address pairs from the DataFrame
 def retrieve_all_pairs(updates_df):
@@ -115,7 +176,6 @@ def retrieve_all_pairs(updates_df):
 
     return all_blockchain_address_pairs
 
-
 # Function to convert a Unix timestamp to a human-readable datetime format
 def unix_to_datetime(unix_timestamp):
     """
@@ -132,7 +192,6 @@ def unix_to_datetime(unix_timestamp):
     formatted_date = datetime_obj.strftime("%Y-%m-%d %H:%M:%S")
     return formatted_date
 
-
 # Function to get the current time in a specific format
 def get_current_time():
     """
@@ -143,7 +202,6 @@ def get_current_time():
     """
     now = datetime.datetime.now()
     return now.strftime("%Y-%m-%d %H:%M:%S")
-
 
 # Function to retrieve OHLCV data from the pool address for a given blockchain
 def retrieve_data_from_pool(blockchain, pool_address):
@@ -172,4 +230,3 @@ def retrieve_data_from_pool(blockchain, pool_address):
 
     except requests.RequestException:
         return [datetime.datetime(2000, 1, 1, 0, 0, 0), 0.0, 0.0]
-

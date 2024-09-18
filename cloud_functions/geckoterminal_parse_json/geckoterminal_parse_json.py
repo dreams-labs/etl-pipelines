@@ -57,7 +57,10 @@ def parse_geckoterminal_json(request):  # pylint: disable=unused-argument  # noq
 
     # Process each coin in parallel using ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(process_coin, coin, storage_client, bigquery_client) for coin in coins_to_process]
+        futures = [
+            executor.submit(process_coin, coin, storage_client, bigquery_client)
+            for coin in coins_to_process
+        ]
         for future in futures:
             future.result()  # Ensure exceptions are raised
 
@@ -105,13 +108,19 @@ def process_coin(coin, storage_client, bigquery_client):
     """
     try:
         # Fetch both JSON objects
-        main_json_data = fetch_coin_json(coin, storage_client, CONFIG['main_metadata_path'], '_main')
-        info_json_data = fetch_coin_json(coin, storage_client, CONFIG['info_metadata_path'], '_info')
+        main_json_data = fetch_coin_json(coin,storage_client,CONFIG['main_metadata_path'],'_main')
+        info_json_data = fetch_coin_json(coin,storage_client,CONFIG['info_metadata_path'],'_info')
 
+        # Upload metadata to BigQuery
         upload_metadata(main_json_data, info_json_data, bigquery_client)
 
-    except Exception as e:
-        logger.error('Error processing coin %s: %s', coin, str(e))
+    except FileNotFoundError as fnf_error:
+        logger.error('File not found for coin %s: %s', coin, str(fnf_error))
+    except KeyError as key_error:
+        logger.error('Key error in coin metadata for %s: %s', coin, str(key_error))
+    except Exception as e: # pylint: disable=W0718
+        # Generic fallback for any other unhandled exceptions
+        logger.error('Unexpected error while processing coin %s: %s', coin, str(e))
 
 
 
@@ -186,8 +195,8 @@ def upload_metadata(main_json_data, info_json_data, bigquery_client):
         top_pools = main_json_data['data']['relationships'].get('top_pools', {}).get('data', [])
 
     # Prepare the aggregated data for upload
+    # pylint: disable=C0301  # Disables line-length warnings for the following lines
     rows_to_insert = [{
-        'coin_id': main_json_data['data']['id'] if main_json_data else None,
         'geckoterminal_id': main_json_data['data']['id'] if main_json_data else None,
         'name': info_json_data['data']['attributes'].get('name', None) if info_json_data else None,
         'symbol': info_json_data['data']['attributes'].get('symbol', None) if info_json_data else None,
@@ -213,9 +222,11 @@ def upload_metadata(main_json_data, info_json_data, bigquery_client):
     # Upload to BigQuery
     errors = bigquery_client.insert_rows_json(table_id, rows_to_insert)
     if not errors:
-        logger.info("Successfully inserted metadata for coin %s", main_json_data['data']['id'])
+        logger.info("Successfully inserted metadata for coin %s",
+                    main_json_data['data']['id'])
     else:
-        logger.error("Error inserting metadata for coin %s: %s", main_json_data['data']['id'], errors)
+        logger.error("Error inserting metadata for coin %s: %s",
+                     main_json_data['data']['id'], errors)
 
 def insert_rows(bigquery_client, table_id, rows_to_insert):
     """
