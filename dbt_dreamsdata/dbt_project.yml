@@ -32,3 +32,7 @@ clean-targets:         # directories to be removed by `dbt clean`
 models:
   dbt_dreamsdata:
     +materialized: view
+    core:
+      +schema: core  # Apply 'core' schema to models in 'core'
+    etl_pipelines:
+      +schema: etl_pipelines  # Apply 'etl_pipelines' schema to models in 'etl_pipelines'

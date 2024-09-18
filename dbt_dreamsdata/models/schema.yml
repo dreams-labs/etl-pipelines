@@ -1,12 +1,21 @@
-
 version: 2
 
 models:
-  - name: core_coins
+  - name: coins
     description: "core.coins table"
+    meta:
+      schema: core  # Documenting the dataset (core)
     columns:
       - name: coin_id
         description: "Unique ID for each coin"
         data_tests:
           - not_null
           - unique
+
+  - name: coin_geckoterminal_metadata
+    description: "Metadata for Geckoterminal coins"
+    meta:
+      schema: etl_pipelines  # Documenting the dataset (etl_pipelines)
+    columns:
+      - name: geckoterminal_id
+        description: "ID of geckoterminal coin"

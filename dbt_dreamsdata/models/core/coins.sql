@@ -1,3 +1,4 @@
--- models/coin_coins.sql
+{{ config(schema='core') }}
+
 SELECT *
 FROM `western-verve-411004.core.coins`

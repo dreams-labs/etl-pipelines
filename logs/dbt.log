@@ -233,3 +233,18 @@ https://docs.getdbt.com/docs/configure-your-profile
 [0m08:02:26.110646 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10954da10>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10443a210>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x11d67a850>]}
 [0m08:02:26.111323 [debug] [MainThread]: Flushing usage events
 [0m08:02:31.395109 [debug] [MainThread]: Error sending anonymous usage statistics. Disabling tracking for this execution. If you wish to permanently disable tracking, see: https://docs.getdbt.com/reference/global-configs#send-anonymous-usage-stats.
+[0m11:16:57.958264 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'start', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x105747cd0>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10579df90>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10579ea50>]}
+
+
+============================== 11:16:57.960895 | 6d92370c-2131-4654-810a-bcfd687d1852 ==============================
+[0m11:16:57.960895 [info ] [MainThread]: Running with dbt=1.8.6
+[0m11:16:57.961164 [debug] [MainThread]: running dbt with arguments {'printer_width': '80', 'indirect_selection': 'eager', 'write_json': 'True', 'log_cache_events': 'False', 'partial_parse': 'True', 'cache_selected_only': 'False', 'warn_error': 'None', 'fail_fast': 'False', 'profiles_dir': '/Users/jeremymeadow/.dbt', 'log_path': 'logs', 'version_check': 'True', 'debug': 'False', 'use_colors': 'True', 'use_experimental_parser': 'False', 'no_print': 'None', 'quiet': 'False', 'empty': 'None', 'warn_error_options': 'WarnErrorOptions(include=[], exclude=[])', 'introspect': 'True', 'static_parser': 'True', 'invocation_command': 'dbt test', 'target_path': 'None', 'log_format': 'default', 'send_anonymous_usage_stats': 'True'}
+[0m11:16:57.961440 [error] [MainThread]: Encountered an error:
+Runtime Error
+  No dbt_project.yml found at expected path /Users/jeremymeadow/DreamsData/GitHub/etl-pipelines/dbt_project.yml
+  Verify that each entry within packages.yml (and their transitive dependencies) contains a file named dbt_project.yml
+  
+[0m11:16:57.962494 [debug] [MainThread]: Resource report: {"command_name": "test", "command_wall_clock_time": 0.038889293, "process_user_time": 0.494129, "process_kernel_time": 0.087841, "process_mem_max_rss": "94748672", "command_success": false, "process_in_blocks": "0", "process_out_blocks": "0"}
+[0m11:16:57.962771 [debug] [MainThread]: Command `dbt test` failed at 11:16:57.962724 after 0.04 seconds
+[0m11:16:57.962935 [debug] [MainThread]: Sending event: {'category': 'dbt', 'action': 'invocation', 'label': 'end', 'context': [<snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x100c22210>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x10579e790>, <snowplow_tracker.self_describing_json.SelfDescribingJson object at 0x100d2dd90>]}
+[0m11:16:57.963087 [debug] [MainThread]: Flushing usage events
