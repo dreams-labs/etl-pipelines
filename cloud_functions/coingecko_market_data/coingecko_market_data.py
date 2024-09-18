@@ -10,6 +10,7 @@ import pandas as pd
 import requests
 import pandas_gbq
 import functions_framework
+from google.cloud import bigquery
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
@@ -63,6 +64,10 @@ def update_coin_market_data_coingecko(request):  # pylint: disable=unused-argume
                 else:
                     logger.info('no new records found for %s.', coingecko_id)
 
+            elif api_status_code == 404:
+                # blacklist ids that return 404 responses so we don't keep retrying them
+                blacklist_coingecko_id(coingecko_id)
+
         except requests.RequestException as req_err:
             logger.error('Network error while retrieving data for %s: %s', coingecko_id, req_err)
         except ValueError as val_err:
@@ -97,10 +102,14 @@ def retrieve_updates_df():
     query_sql = '''
         with coingecko_data_status as (
             select cgi.coingecko_id
-            ,max(md.date) as most_recent_record
+            ,max(md.updated_at) as most_recent_record
             from `etl_pipelines.coin_coingecko_ids` cgi
             left join `etl_pipelines.coin_market_data_coingecko` md on md.coingecko_id = cgi.coingecko_id
+
+            -- filter to remove ids that result in 404 responses
+            left join `etl_pipelines.coingecko_ids_blacklist` bl on bl.coingecko_id = cgi.coingecko_id
             where cgi.coingecko_id is not null
+            and bl.coingecko_id is null
             group by 1
         )
 
@@ -357,3 +366,31 @@ def upload_market_data(market_df):
         ,api_method='load_csv'
     )
     logger.info('appended upload df to %s.', table_name)
+
+
+def blacklist_coingecko_id(coingecko_id: str):
+    """
+    Blacklist a Coingecko ID by inserting it into the specified BigQuery table
+    when a 404 error is encountered.
+
+    Args:
+        coingecko_id (str): The Coingecko ID to be blacklisted.
+    Returns:
+        None
+    """
+    # Initialize BigQuery client
+    client = bigquery.Client()
+
+    # Prepare the full table name
+    table_full_name = "western-verve-411004.etl_pipelines.coingecko_ids_blacklist"
+
+    # Prepare the SQL query to insert the blacklisted coingecko_id
+    insert_blacklist_query = f"""
+        INSERT INTO `{table_full_name}` (coingecko_id, blacklisted_at, reason)
+        VALUES ('{coingecko_id}', CURRENT_TIMESTAMP(), '404 Not Found')
+    """
+
+    # Run the query using the BigQuery client
+    client.query(insert_blacklist_query)
+
+    logger.info('Coingecko ID %s has been blacklisted due to 404 response.', coingecko_id)
