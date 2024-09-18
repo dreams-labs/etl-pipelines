@@ -171,7 +171,7 @@ def test_ping_geckoterminal_api_rate_limit_success(mock_sleep, mock_get, api_par
 @pytest.mark.unit
 @patch('geckoterminal_coin_metadata.requests.get')
 @patch('geckoterminal_coin_metadata.time.sleep')
-def test_ping_geckoterminal_api_max_retries_exceeded(mock_sleep, mock_get, api_params, mock_rate_limited_response):
+def test_ping_geckoterminal_api_max_retries_exceeded(mock_sleep, mock_get, api_params, mock_rate_limited_response, caplog):
     """
     Test the ping_geckoterminal_api function when max retries are exceeded.
 
@@ -187,11 +187,13 @@ def test_ping_geckoterminal_api_max_retries_exceeded(mock_sleep, mock_get, api_p
     # Arrange
     mock_get.return_value = mock_rate_limited_response
 
-    # Act
-    response_data, status_code = gtm.ping_geckoterminal_api(
-        api_params['blockchain'],
-        api_params['address']
-    )
+    # Suppress ERROR log messages
+    with caplog.at_level("CRITICAL", logger="root"):
+        # Act
+        response_data, status_code = gtm.ping_geckoterminal_api(
+            api_params['blockchain'],
+            api_params['address']
+        )
 
     # Assert
     assert status_code == 429
@@ -202,9 +204,19 @@ def test_ping_geckoterminal_api_max_retries_exceeded(mock_sleep, mock_get, api_p
     assert mock_get.call_count == 3
     assert mock_sleep.call_count == 3
 
+    # Assert
+    assert status_code == 429
+    assert 'error' in response_data
+    assert response_data['error'] == "Rate limit exceeded"
+
+    # Verify that the API was called 3 times (initial + 2 retries) and sleep was called twice
+    assert mock_get.call_count == 3
+    assert mock_sleep.call_count == 3
+
+
 @pytest.mark.unit
 @patch('geckoterminal_coin_metadata.requests.get')
-def test_ping_geckoterminal_api_error_response(mock_get, api_params, mock_error_response):
+def test_ping_geckoterminal_api_error_response(mock_get, api_params, mock_error_response, caplog):
     """
     Test the ping_geckoterminal_api function for an error API response.
 
@@ -219,11 +231,13 @@ def test_ping_geckoterminal_api_error_response(mock_get, api_params, mock_error_
     # Arrange
     mock_get.return_value = mock_error_response
 
-    # Act
-    response_data, status_code = gtm.ping_geckoterminal_api(
-        api_params['blockchain'],
-        api_params['address']
-    )
+    # Suppress ERROR log messages
+    with caplog.at_level("CRITICAL", logger="root"):
+        # Act
+        response_data, status_code = gtm.ping_geckoterminal_api(
+            api_params['blockchain'],
+            api_params['address']
+        )
 
     # Assert
     assert status_code == 404

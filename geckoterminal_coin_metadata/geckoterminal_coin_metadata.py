@@ -65,7 +65,6 @@ def retrieve_coingecko_metadata(request):  # pylint: disable=unused-argument  # 
         and ch.chain_text_geckoterminal is not null -- removes coins without geckoterminal chain aliases
         and cgi.coin_id is null -- removes coins that have already been searched for
         group by 1, 2, 3
-        limit 20
     '''
 
     update_queue_df = dgc().run_sql(query_sql)

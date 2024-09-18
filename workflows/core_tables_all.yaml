@@ -20,17 +20,17 @@ main:
         call: http.get
         args:
             url: https://core-coins-fatui3rd2a-uw.a.run.app
-            query: 
+            query:
                 "intake_new_coins": "true"
             auth:
                 type: OIDC
             timeout: 300
 
-    - retrieveCoingeckoMetadata:
-        # attempt to match new coins to coingecko and retrieve their metadata
+    - retrieveCoinMetadata:
+        # attempt to match new coins to coingecko/geckoterminal and retrieve their metadata
         call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
         args:
-            workflow_id: core-coin-facts-coingecko
+            workflow_id: core-coin-facts-metadata
             connector_params:
                 timeout: 1800
 
@@ -47,7 +47,7 @@ main:
         call: http.get
         args:
             url: https://core-coins-fatui3rd2a-uw.a.run.app
-            query: 
+            query:
                 "intake_new_coins": "false"
             auth:
                 type: OIDC
