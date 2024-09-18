@@ -100,4 +100,3 @@ def insert_coingecko_market_data():
         '''
 
     dgc().run_sql(query_sql)
-

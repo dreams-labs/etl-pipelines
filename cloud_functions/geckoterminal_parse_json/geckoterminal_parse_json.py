@@ -210,7 +210,12 @@ def upload_metadata(main_json_data, info_json_data, bigquery_client):
         'discord_url': info_json_data['data']['attributes'].get('discord_url', None) if info_json_data else None,
         'telegram_handle': info_json_data['data']['attributes'].get('telegram_handle', None) if info_json_data else None,
         'twitter_handle': info_json_data['data']['attributes'].get('twitter_handle', None) if info_json_data else None,
-        'total_supply': main_json_data['data']['attributes'].get('total_supply', None) if main_json_data else None,
+
+        # total supply needs to be divided by decimals to reflect whole tokens
+        'total_supply': (main_json_data['data']['attributes'].get('total_supply', None) / (10 ** info_json_data['data']['attributes'].get('decimals', 0)))
+                        if main_json_data and info_json_data and main_json_data['data']['attributes'].get('total_supply', None) and info_json_data['data']['attributes'].get('decimals', None) is not None
+                        else None,
+
         'top_pools': top_pools,
         'main_json_status': main_json_status,
         'info_json_status': info_json_status,

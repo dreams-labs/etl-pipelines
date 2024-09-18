@@ -12,6 +12,11 @@ models:
         data_tests:
           - not_null
           - unique
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - chain_id
+            - address
 
   - name: coin_facts_metadata
     description: "aggregated metadata from all sources"
