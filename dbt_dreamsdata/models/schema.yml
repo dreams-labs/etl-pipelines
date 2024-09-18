@@ -19,3 +19,20 @@ models:
     columns:
       - name: geckoterminal_id
         description: "ID of geckoterminal coin"
+        data_tests:
+          - not_null
+          - unique
+  - name: coin_market_data_coingecko
+    description: "Coingecko market data"
+    meta:
+      schema: etl_pipelines
+    columns:
+      - name: date
+        description: "The date of the market data"
+      - name: coingecko_id
+        description: "The Coingecko ID of the coin"
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - date
+            - coingecko_id
