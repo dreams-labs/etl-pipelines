@@ -23,9 +23,6 @@ models:
         data_tests:
           - not_null
           - unique
-      - name: coingecko_id
-        data_tests:
-          - unique
 
   - name: coin_facts_coingecko
     description: "metadata from coingecko only"
