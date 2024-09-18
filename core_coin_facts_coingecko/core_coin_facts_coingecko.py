@@ -1,12 +1,6 @@
 '''
 cloud function that runs a query to refresh the data in bigquery table core.coin_facts_coingecko
 '''
-import datetime
-import time
-import logging
-import os
-from pytz import utc
-import pandas as pd
 import functions_framework
 import dreams_core.core as dc
 from dreams_core.googlecloud import GoogleCloud as dgc
@@ -16,7 +10,7 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
-def rebuild_coin_facts_coingecko(request):
+def rebuild_coin_facts_coingecko(request):  # pylint: disable=unused-argument  # noqa: F841
     '''
     rebuilds the core.coin_facts_coingecko table to incorporate any new metadata
     '''
@@ -46,7 +40,7 @@ def rebuild_coin_facts_coingecko(request):
         )
 
         ,prep_cg_metadata as (
-        select 
+        select
             coingecko_id
             ,symbol
             ,name
@@ -56,6 +50,7 @@ def rebuild_coin_facts_coingecko(request):
             ,total_supply
             ,max_supply
             ,circulating_supply
+            ,description
             ,updated_at
             ,row_number() over (partition by coingecko_id order by updated_at desc) as rn --to remove duplicates
         from etl_pipelines.coin_coingecko_metadata
@@ -72,13 +67,14 @@ def rebuild_coin_facts_coingecko(request):
             ,total_supply
             ,max_supply
             ,circulating_supply
+            ,description
             ,updated_at
         from prep_cg_metadata
         where rn = 1
         )
 
         ,cg_contracts as (
-        select 
+        select
             coingecko_id
             ,coingecko_rank
             ,blockchain
@@ -96,8 +92,8 @@ def rebuild_coin_facts_coingecko(request):
         )
 
         ,cg_categories as (
-        select distinct coingecko_id,category 
-        from etl_pipelines.coin_coingecko_categories 
+        select distinct coingecko_id,category
+        from etl_pipelines.coin_coingecko_categories
         where coingecko_rank = 1 and updated_at is not null
         )
 
@@ -113,6 +109,7 @@ def rebuild_coin_facts_coingecko(request):
             ,cm.total_supply
             ,cm.max_supply
             ,cm.circulating_supply
+            ,cm.description
             ,cm.updated_at
             ,cgc.blockchain
             ,cgc.address
@@ -120,7 +117,9 @@ def rebuild_coin_facts_coingecko(request):
             ,cgct.category
         from coingecko_coins cc
         join cg_metadata cm on cc.coingecko_id = cm.coingecko_id
-        left join cg_contracts cgc on cgc.coingecko_id = cc.coingecko_id
+        join cg_contracts cgc on cgc.coingecko_id = cc.coingecko_id
+            and cgc.address is not null
+            and cgc.address <> ''
         left join cg_categories cgct on cgct.coingecko_id = cc.coingecko_id
         )
 
@@ -130,6 +129,6 @@ def rebuild_coin_facts_coingecko(request):
         '''
 
     dgc().run_sql(query_sql)
-    logger.info(f'rebuilt core.coin_facts_coingecko.')
+    logger.info('rebuilt core.coin_facts_coingecko.')
 
     return "rebuild of core.coin_facts_coingecko complete."

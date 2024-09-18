@@ -1,0 +1,87 @@
+# Workflow to retrieve metadata from CoinGecko and Geckoterminal, parse and upload
+# the responses, and rebuild the core.coin_facts_metadata table. 
+main:
+    steps:
+        - init:
+            assign:
+                - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+                - service_account: western-verve-411004@appspot.gserviceaccount.com
+        # Run Coingecko and Geckoterminal sequences in parallel
+        - retrieveMetadata:
+            parallel:
+                branches:
+
+                    # Coingecko metadata update sequence
+                    - coingeckoSequence:
+                        steps:
+
+                            # Retrieve metadata from API and store in Cloud Storage
+                            - coingeckoRetrieveMetadata:
+                                try:
+                                    call: http.get
+                                    args:
+                                        url: https://coingecko-coin-metadata-fatui3rd2a-uw.a.run.app
+                                        auth:
+                                            type: OIDC
+                                        timeout: 1800
+                                retry:
+                                    max_retries: 3
+                                    backoff:
+                                        initial_delay: 30
+                                        max_delay: 120
+                                        multiplier: 2
+
+                            # Parse responses from Cloud Storage and load to BigQuery
+                            - coingeckoParseJson:
+                                call: http.get
+                                args:
+                                    url: https://coingecko-parse-json-fatui3rd2a-uw.a.run.app
+                                    auth:
+                                        type: OIDC
+
+                            # Rebuild consolidated core.coin_facts_coingecko table
+                            - rebuildCoingeckoTable:
+                                call: http.get
+                                args:
+                                    url: https://core-coin-facts-coingecko-fatui3rd2a-uw.a.run.app
+                                    auth:
+                                        type: OIDC
+
+                    # Geckoterminal metadata update sequence
+                    - geckoterminalSequence:
+                        steps:
+
+                            # Retrieve metadata from API and store in Cloud Storage
+                            - geckoterminalRetrieveMetadata:
+                                try:
+                                    call: http.get
+                                    args:
+                                        url: https://geckoterminal-coin-metadata-954736581165.us-west1.run.app
+                                        auth:
+                                            type: OIDC
+                                        timeout: 1800
+                                retry:
+                                    max_retries: 3
+                                    backoff:
+                                        initial_delay: 30
+                                        max_delay: 120
+                                        multiplier: 2
+
+                            # Parse responses from Cloud Storage and load to BigQuery
+                            - geckoterminalParseJson:
+                                call: http.get
+                                args:
+                                    url: https://geckoterminal-parse-json-954736581165.us-west1.run.app
+                                    auth:
+                                        type: OIDC
+
+        # After both sequences are complete, rebuild core.coin_facts_metadata
+        - rebuildCoreMetadataTable:
+            call: http.get
+            args:
+                url: https://core-coin-facts-metadata-954736581165.us-west1.run.app
+                auth:
+                    type: OIDC
+            result: resp
+        - returnOutput:
+            return: '${resp}'
