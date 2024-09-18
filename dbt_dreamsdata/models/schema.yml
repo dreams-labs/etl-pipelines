@@ -1,6 +1,7 @@
 version: 2
 
 models:
+  # Core Schema
   - name: coins
     description: "core.coins table"
     meta:
@@ -11,7 +12,49 @@ models:
         data_tests:
           - not_null
           - unique
+  - name: coin_facts_metadata
+    description: "aggregated metadata from all sources"
+    meta:
+      schema: core  # Documenting the dataset (core)
+    columns:
+      - name: coin_id
+        description: "Unique ID for each coin"
+        data_tests:
+          - not_null
+          - unique
+      - name: coingecko_id
+        data_tests:
+          - unique
+  - name: coin_facts_coingecko
+    description: "metadata from coingecko only"
+    meta:
+      schema: core  # Documenting the dataset (core)
+    columns:
+      - name: coin_id
+        description: "Unique ID for each coin"
+        data_tests:
+          - not_null
+          - unique
+      - name: coingecko_id
+        data_tests:
+          - not_null
+          - unique
+  - name: coin_market_data
+    description: "market data aggregated from all sources"
+    meta:
+      schema: core
+    columns:
+      - name: date
+        description: "The date of the market data"
+      - name: coin_id
+        description: "coin_id"
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - date
+            - coin_id
 
+  # ETL Pipelines Schema
   - name: coin_geckoterminal_metadata
     description: "Metadata for Geckoterminal coins"
     meta:
