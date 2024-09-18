@@ -12,6 +12,7 @@ models:
         data_tests:
           - not_null
           - unique
+
   - name: coin_facts_metadata
     description: "aggregated metadata from all sources"
     meta:
@@ -25,6 +26,7 @@ models:
       - name: coingecko_id
         data_tests:
           - unique
+
   - name: coin_facts_coingecko
     description: "metadata from coingecko only"
     meta:
@@ -39,6 +41,7 @@ models:
         data_tests:
           - not_null
           - unique
+
   - name: coin_market_data
     description: "market data aggregated from all sources"
     meta:
@@ -65,6 +68,7 @@ models:
         data_tests:
           - not_null
           - unique
+
   - name: coin_market_data_coingecko
     description: "Coingecko market data"
     meta:
