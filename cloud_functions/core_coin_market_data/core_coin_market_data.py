@@ -60,40 +60,76 @@ def insert_coingecko_market_data():
     '''
 
     query_sql = '''
-
         truncate table core.coin_market_data;
 
         insert into core.coin_market_data (
 
-        select md.date
-        ,co.coin_id
-        ,co.chain_id
-        ,co.address
-        ,md.price
+            with coingecko_market_data as (
+                select md.date
+                ,co.coin_id
+                ,co.chain_id
+                ,co.address
+                ,md.price
 
-        -- use fdv if market cap data isn't available
-        ,case
-            when md.market_cap > 0 then md.market_cap
-            else cast(md.price*co.total_supply as int64)
-            end as market_cap
+                -- use fdv if market cap data isn't available
+                ,case
+                    when md.market_cap > 0 then md.market_cap
+                    else cast(md.price*co.total_supply as int64)
+                    end as market_cap
 
-        -- calculate fdv using total supply
-        ,cast(md.price*co.total_supply as int64) as fdv
+                -- calculate fdv using total supply
+                ,cast(md.price*co.total_supply as int64) as fdv
 
-        -- calculate circulating supply using market cap
-        ,case
-            when md.market_cap > 0 then cast(md.market_cap/md.price as int64)
-            else cast(co.total_supply as int64)
-            end as circulating_supply
+                -- calculate circulating supply using market cap
+                ,case
+                    when md.market_cap > 0 then cast(md.market_cap/md.price as int64)
+                    else cast(co.total_supply as int64)
+                    end as circulating_supply
 
-        -- total supply retrieved from coingecko metadata tables
-        ,cast(co.total_supply as int64) as total_supply
+                -- total supply retrieved from coingecko metadata tables
+                ,cast(co.total_supply as int64) as total_supply
 
-        ,md.volume
-        ,'coingecko' as data_source
-        ,md.updated_at
-        from core.coins co
-        join etl_pipelines.coin_market_data_coingecko md on md.coingecko_id = co.coingecko_id
+                ,md.volume
+                ,'coingecko' as data_source
+                ,md.updated_at
+                from core.coins co
+                join etl_pipelines.coin_market_data_coingecko md on md.coingecko_id = co.coingecko_id
+            ),
+
+            geckoterminal_market_data as (
+                select md.date
+                ,co.coin_id
+                ,co.chain_id
+                ,co.address
+                ,cast(md.close as bignumeric) as price
+
+                -- geckoterminal doesn't provide market cap
+                ,null as market_cap
+
+                -- calculate fdv using total supply
+                ,cast(md.close*co.total_supply as int64) as fdv
+
+                -- geckoterminal doesn't provide market cap to calculate circulating supply with
+                ,null as circulating_supply
+
+                -- total supply retrieved from coingecko metadata tables
+                ,cast(co.total_supply as int64) as total_supply
+
+                ,cast(md.volume as int64)
+                ,'geckoterminal' as data_source
+                ,md.updated_at
+                from core.coins co
+                join etl_pipelines.coin_market_data_geckoterminal md on md.geckoterminal_id = co.geckoterminal_id
+
+                -- filter out any coin_id-date pairs that already have records from coingecko
+                left join coingecko_market_data on coingecko_market_data.coin_id = co.coin_id
+                    and coingecko_market_data.date = md.date
+                where coingecko_market_data.coin_id is null
+            )
+
+        select * from coingecko_market_data
+        union all
+        select * from geckoterminal_market_data
 
         );
         '''
