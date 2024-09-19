@@ -71,6 +71,25 @@ models:
           - not_null
           - unique
 
+  - name: coin_market_data_geckoterminal
+    description: "Geckoterminal market data"
+    meta:
+      schema: etl_pipelines
+    columns:
+      - name: date
+        description: "The date of the market data"
+        data_tests:
+          - not_null
+      - name: geckoterminal_id
+        description: "Geckoterminal's coin id per their API"
+        data_tests:
+          - not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - date
+            - geckoterminal_id
+
   - name: coin_market_data_coingecko
     description: "Coingecko market data"
     meta:

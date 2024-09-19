@@ -1,12 +1,19 @@
 """
-update geckoterminal market data
+This script retrieves and updates market data from GeckoTerminal for a list of coins
+that do not have Coingecko data. The data is fetched via multiple API calls to obtain
+market data such as OHLCV (Open, High, Low, Close, Volume) from token pools. The data
+is then uploaded to a BigQuery table for further analysis. The script includes retry
+logic to handle rate limits and HTTP errors gracefully.
 """
+# pylint: disable=C0301
+
 import time
 import datetime
 from pytz import utc
 import requests
 import pandas as pd
 import functions_framework
+import pandas_gbq
 import dreams_core.core as dc
 from dreams_core.googlecloud import GoogleCloud as dgc
 
@@ -17,7 +24,18 @@ logger = dc.setup_logger()
 @functions_framework.http
 def update_geckoterminal_market_data(request):  # pylint: disable=unused-argument  # noqa: F841
     """
-    update the market data
+    Fetches updated market data for tokens without Coingecko data and uploads it to BigQuery.
+
+    1. Retrieves a list of tokens that need GeckoTerminal data updates.
+    2. For each token, retrieves associated pool information using the GeckoTerminal API.
+    3. Fetches OHLCV data (Open, High, Low, Close, Volume) for each pool address.
+    4. Aggregates the data into a DataFrame and uploads it to BigQuery.
+
+    Parameters:
+        request (flask.Request): A Flask request object, though it is unused in this function.
+
+    Returns:
+        str: A success message when the update process completes.
     """
 
     # 1. Retrieve and structure records for coins to update
@@ -25,65 +43,59 @@ def update_geckoterminal_market_data(request):  # pylint: disable=unused-argumen
     # Retrieve the list of all coins to be updated
     updates_df = retrieve_updates_df()
 
-    # Transform updates_df to make pairs of blockchain-addresses to be fed into the API
-    all_blockchain_address_pairs = list_all_pairs(updates_df)
+    # Generate a list of arrays containing each token's id, chain, and address
+    all_blockchain_address_pairs = [
+        [row['geckoterminal_id'], row['chain_text_geckoterminal'], row['address']]
+        for _, row in updates_df.iterrows()
+    ]
 
-
-    # 2. Retrieve market data from Geckoterminal
-    # ------------------------------------------
+    # 2. Ping Geckoterminal API to get pool address
+    # ---------------------------------------------
     # Retrieve all pool addresses for the blockchain-address pairs
     all_pairs_with_pools = retrieve_all_pool_addresses(all_blockchain_address_pairs)
 
 
-    # Add OHLCV data from pools and current time
-    updated_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 3. Ping Geckoterminal API to get pool market data and aggregate it
+    # ------------------------------------------------------------------
+    # Retrieve OHLCV data for pool addresses
+    all_market_data = []
     for pair in all_pairs_with_pools:
-
-        # if no pool_address was returned from the earlier call, continue
-        if pair[2]is None:
+        # if no pool_address was returned from the earlier call, skip the coin
+        if pair[3]is None:
             continue
 
-        ohlcv_data = retrieve_market_data_for_pool(pair)
-        pair.extend([ohlcv_data[0], ohlcv_data[1], ohlcv_data[2], updated_at])
+        # if market data is successfully retreived, append it
+        market_df = retrieve_market_data_for_pool(pair)
+        if not market_df.empty:
+            all_market_data.append(market_df)
 
-    # Create a DataFrame from the updated list
-    info_df = pd.DataFrame(
-        all_pairs_with_pools,
-        columns=['chain', 'address', 'pool_address', 'date', 'price', 'volume', 'updated_at']
-    )
+        # pause to accomodate 30 calls/minute rate limit
+        time.sleep(2)
 
-    # Define the data types for the DataFrame
-    dtypes = {
-        'chain': 'object',
-        'address': 'object',
-        'pool_address': 'object',
-        'date': 'object',
-        'price': 'object',
-        'volume': 'object',
-        'updated_at': 'object'
-    }
+    if all_market_data:
+        combined_market_df = pd.concat(all_market_data, ignore_index=True)
 
-    # Apply the data types to the DataFrame
-    info_df = info_df.astype(dtypes)
 
-    # Merge the new data with the original updates DataFrame
-    updates_df = pd.merge(updates_df, info_df, on='address', how='left')
+    # 4. Filter existing records and upload the remaining market data to BigQuery
+    # ---------------------------------------------------------------------------
+    new_market_data_df = filter_new_market_data(updates_df, combined_market_df)
 
-    # Drop the 'chain' column as it is no longer needed
-    updates_df = updates_df.drop('chain', axis=1)
+    if not combined_market_df.empty:
+        upload_combined_market_df(new_market_data_df)
 
-    return 'all done'
+    return "finished updating geckoterminal market data"
+
 
 
 def retrieve_updates_df():
-    '''
+    """
     pulls a list of tokens in need of a geckoterminal market data update. this is defined as \
         coins that don't have coingecko_ids and that either have no market data or whose market \
         data is 2+ days out of date.
 
     returns:
         updates_df (dataframe): list of tokens that need market data updates
-    '''
+    """
 
     query_sql = '''
         with geckoterminal_data_status as (
@@ -117,32 +129,12 @@ def retrieve_updates_df():
             or ds.most_recent_record < (current_date('UTC') - 2)
         )
         group by 1,2,3,4
+        order by 1
         '''
 
     updates_df = dgc().run_sql(query_sql)
 
     return updates_df
-
-
-# Function to extract blockchain/address pairs from the DataFrame
-def list_all_pairs(updates_df):
-    """
-    Generates a list of blockchain-token address pairs from the updates DataFrame.
-
-    Parameters:
-    updates_df (DataFrame): The df containing 'chain_text_geckoterminal' and 'address' columns.
-
-    Returns:
-    list: A list of blockchain and address pairs.
-    """
-    all_blockchain_address_pairs = []
-
-    for _, row in updates_df.iterrows():
-        chain_text_geckoterminal = row['chain_text_geckoterminal']
-        address = row['address']
-        all_blockchain_address_pairs.append([chain_text_geckoterminal, address])
-
-    return all_blockchain_address_pairs
 
 
 # Function to retrieve all pool addresses for a list of blockchain/address pairs
@@ -159,7 +151,7 @@ def retrieve_all_pool_addresses(all_blockchain_address_pairs):
     all_pairs_with_pools = []
 
     for pair in all_blockchain_address_pairs:
-        pool_address = retrieve_pool_address(pair[0], pair[1])
+        pool_address = retrieve_pool_address(pair[1], pair[2])
         pair.append(pool_address)
         all_pairs_with_pools.append(pair)
 
@@ -250,40 +242,69 @@ def retrieve_market_data_for_pool(pair):
     Retrieves OHLCV (Open, High, Low, Close, Volume) data from a pool for a specific blockchain.
 
     Parameters:
-    blockchain (str): The blockchain identifier.
-    pool_address (str): The pool address to query.
+    pair (series): A series of the blockchain, token address, and pool address for one coin
 
     Returns:
-    list: A list containing the date, close price, and volume if successful, otherwise a default list.
+    market_df (dataframe): Either a dataframe with valid OHLCV data or an empty dataframe
     """
-    BASE_URL = "https://api.geckoterminal.com/api/v2/networks"
+    BASE_URL = "https://api.geckoterminal.com/api/v2/networks"  # pylint: disable=C0103
 
-    blockchain = pair[0]
-    token_address = pair[0]
-    pool_address = pair[2]
+    geckoterminal_id = pair[0]
+    blockchain = pair[1]
+    token_address = pair[2]
+    pool_address = pair[3]
 
     try:
-        # make the request
+        # Make the request
         r = requests.get(f"{BASE_URL}/{blockchain}/pools/{pool_address}/ohlcv/day",
                          timeout=30)
+
+        # Raise an HTTPError if the HTTP request returned an unsuccessful status code
+        r.raise_for_status()
+
+        # Check if the expected data structure is present
         data = r.json()
+        if ("data" not in data or
+            "attributes" not in data["data"] or
+            "ohlcv_list" not in data["data"]["attributes"]):
+            logger.warning("Malformed data structure received.")
+            return pd.DataFrame()
 
-        # upload the raw response to cloud storage
-        if r.status_code == 200:
-            filename = f"{blockchain}_{token_address}_{datetime.datetime.now(utc).strftime('%Y%m%d_%H%M')}.json"
-            dgc().gcs_upload_file(data, gcs_folder='data_lake/geckoterminal_market_data', filename=filename)
+        # Check if the OHLCV list is empty
+        if len(data["data"]["attributes"]["ohlcv_list"])==0:
+            logger.warning("Received empty ohlcv_list from API.")
+            return pd.DataFrame()
 
-        # process the data
-        ohlcv_list = data["data"]["attributes"]["ohlcv_list"][0]
-        unix_timestamp = unix_to_datetime(ohlcv_list[0])
-        daily_close_price = ohlcv_list[4]
-        daily_volume = ohlcv_list[5]
-        ohlcv_data = [unix_timestamp, daily_close_price, daily_volume]
+        # Store the raw JSON response in cloud storage
+        filename_datetime = datetime.datetime.now(utc).strftime('%Y%m%d_%H%M')
+        filename = f"{blockchain}_{token_address}_{filename_datetime}.json"
+        dgc().gcs_upload_file(
+            data, gcs_folder='data_lake/geckoterminal_market_data', filename=filename)
+        logger.debug("Stored valid API response data for %s:%s.", blockchain, token_address)
 
-        return ohlcv_data
+        # Process the valid response into a dataframe
+        if len(data["data"]["attributes"]["ohlcv_list"]) > 0:
+            market_df = pd.DataFrame(data["data"]["attributes"]["ohlcv_list"])
+            market_df.columns = ['date','open','high','low','close','volume']
+            market_df['date'] = market_df['date'].apply(unix_to_datetime)
 
-    except requests.RequestException:
-        return [datetime.datetime(2000, 1, 1, 0, 0, 0), 0.0, 0.0]
+            # append metadata
+            market_df['geckoterminal_id'] = geckoterminal_id
+            market_df['pool_address'] = pool_address
+            market_df['blockchain'] = blockchain
+
+            return market_df
+
+    except requests.exceptions.HTTPError as http_err:
+        logger.warning("HTTP error occurred: %s", http_err)
+        return pd.DataFrame()
+    except requests.exceptions.RequestException as req_err:
+        logger.warning("Request exception occurred: %s", req_err)
+        return pd.DataFrame()
+    except Exception as e:  # pylint: disable=W0718
+        logger.warning("An unexpected error occurred: %s", e)
+        return pd.DataFrame()
+
 
 
 # Function to convert a Unix timestamp to a human-readable datetime format
@@ -297,8 +318,87 @@ def unix_to_datetime(unix_timestamp):
     Returns:
     str: The formatted date as a string.
     """
-    datetime_obj = datetime.datetime.fromtimestamp(unix_timestamp)
+    datetime_obj = datetime.datetime.fromtimestamp(unix_timestamp, tz=datetime.timezone.utc)
     datetime_obj = datetime_obj.replace(hour=0, minute=0, second=0, microsecond=0)
     formatted_date = datetime_obj.strftime("%Y-%m-%d %H:%M:%S")
+
     return formatted_date
 
+def filter_new_market_data(updates_df, combined_market_df):
+    """
+    Filters combined_market_df to keep only the rows with data that isn't already in BigQuery.
+
+    Args:
+        updates_df (DataFrame): DataFrame containing current state of the BigQuery table
+        combined_market_df (DataFrame): DataFrame containing new market data
+
+    Returns:
+        DataFrame: A filtered DataFrame with only new market data
+    """
+
+    # Create a df showing all existing bigquery records by exploding the 'all_dates' column
+    existing_dates_df = updates_df.explode('all_dates')
+    existing_dates_df['all_dates'] = pd.to_datetime(existing_dates_df['all_dates']).dt.tz_localize('UTC')
+    existing_dates_df = existing_dates_df[['geckoterminal_id', 'all_dates']].rename(columns={'all_dates': 'date'})
+
+    # Set market data to be a UTC datetime
+    combined_market_df['date'] = pd.to_datetime(combined_market_df['date']).dt.tz_localize('UTC')
+
+    # Merge combined_market_df with existing_dates_df on 'geckoterminal_id' and 'date'
+    merged_df = pd.merge(
+        combined_market_df,
+        existing_dates_df,
+        on=['geckoterminal_id', 'date'],
+        how='left',
+        indicator=True
+    )
+
+    # Filter to keep only rows that aren't already in BigQuery
+    filtered_market_df = merged_df[merged_df['_merge'] == 'left_only'].drop(columns=['_merge'])
+
+    return filtered_market_df
+
+
+def upload_combined_market_df(combined_market_df):
+    """
+    Uploads the combined_market_df DataFrame to a BigQuery table by appending the data.
+
+    Parameters:
+    combined_market_df (DataFrame): The DataFrame containing the market data to upload.
+
+    Returns:
+    None
+    """
+
+    # Define the data types for the DataFrame
+    dtypes = {
+        'geckoterminal_id': 'object',
+        'blockchain': 'object',
+        'pool_address': 'object',
+        'date': 'datetime64[ns, UTC]',
+        'open': 'float',
+        'high': 'float',
+        'low': 'float',
+        'close': 'float',
+        'volume': 'float',
+        'updated_at': 'datetime64[ns, UTC]'
+    }
+
+    # Set updated_at time
+    updated_at = datetime.datetime.now(utc).strftime('%Y-%m-%d %H:%M:%S')
+    combined_market_df.loc[:, 'updated_at'] = updated_at
+
+    # Apply the data types to the DataFrame
+    combined_market_df = combined_market_df.astype(dtypes)
+
+    # Upload the DataFrame to BigQuery
+    destination_table = 'etl_pipelines.coin_market_data_geckoterminal'
+    project_id = 'western-verve-411004'
+    pandas_gbq.to_gbq(
+        combined_market_df,
+        destination_table=destination_table,
+        project_id=project_id,
+        if_exists='append'
+    )
+    logger.info("Uploaded %s rows to etl_pipelines.coin_market_data_geckoterminal.",
+                combined_market_df.shape[0])
