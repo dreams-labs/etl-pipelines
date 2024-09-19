@@ -119,13 +119,13 @@ def retrieve_updates_df():
 
         select cds.coingecko_id
         ,cds.most_recent_record
-        ,array_agg(cmd.date order by cmd.date asc) as all_dates
+        ,array_agg(cmd.date IGNORE NULLS order by cmd.date asc) as all_dates
         from coingecko_data_status cds
         join `etl_pipelines.coin_market_data_coingecko` cmd on cmd.coingecko_id = cds.coingecko_id
-        --where (
-        --    cds.most_recent_record is null
-        --    or cds.most_recent_record < (current_date('UTC') - 2)
-        --)
+        where (
+            cds.most_recent_record is null
+            or cds.most_recent_record < (current_date('UTC') - 2)
+        )
         group by 1,2
         '''
 
