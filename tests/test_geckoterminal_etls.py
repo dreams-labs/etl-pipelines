@@ -17,9 +17,9 @@ from dotenv import load_dotenv
 from dreams_core import core as dc
 
 # project modules
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../geckoterminal_coin_metadata')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../cloud_functions/geckoterminal_coin_metadata')))
 import geckoterminal_coin_metadata as gtm # type: ignore[reportMissingImports]
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../geckoterminal_parse_json')))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../cloud_functions/geckoterminal_parse_json')))
 import geckoterminal_parse_json as gpj # type: ignore[reportMissingImports]
 
 load_dotenv()
@@ -252,7 +252,7 @@ def test_ping_geckoterminal_api_error_response(mock_get, api_params, mock_error_
 # geckoterminal_parse_json() unit tests
 # ---------------------------------------- #
 
-# Sample main and info JSON data for normal case
+# Updated main and info JSON data for a complete set of values
 main_json_data_complete = {
     'data': {
         'id': 'avax_0x024e12c5c75dfbd75ea4bd2df5d11984836d6ac5',
@@ -276,17 +276,25 @@ info_json_data_complete = {
             'decimals': 18,
             'image_url': 'missing.png',
             'websites': [],
-            'gt_score': 46.97
+            'gt_score': 46.97,
+            'coingecko_coin_id': 'pry_coin',  # Added coingecko_coin_id
+            'description': 'Perry coin for decentralized finance',  # Added description
+            'discord_url': 'https://discord.com/invite/pry',  # Added discord_url
+            'telegram_handle': '@prycoin',  # Added telegram_handle
+            'twitter_handle': '@prycoin'  # Added twitter_handle
         }
     }
 }
 
 def test_upload_metadata_complete():
     """
-    Confirms that the correctly formatted rows were isnerted correctly
+    Confirms that the correctly formatted rows were inserted correctly
     """
     # Mock BigQuery client
     mock_bq_client = MagicMock()
+
+    # Ensure the mock insert_rows_json returns no errors
+    mock_bq_client.insert_rows_json.return_value = []
 
     # Call the function to test
     gpj.upload_metadata(main_json_data_complete, info_json_data_complete, mock_bq_client)
@@ -299,18 +307,3 @@ def test_upload_metadata_complete():
     assert rows[0]['info_json_status'] == 'success'
     assert rows[0]['overall_status'] == 'complete'
     assert rows[0]['error_message'] is None
-
-# Sample main JSON data, with info_json_data being None (missing)
-main_json_data_only = {
-    'data': {
-        'id': 'avax_0x024e12c5c75dfbd75ea4bd2df5d11984836d6ac5',
-        'attributes': {
-            'total_supply': '72000000000000000000000000000000.0'
-        },
-        'relationships': {
-            'top_pools': {
-                'data': [{'id': 'avax_0x6e9980ba9430030da896d8fdebf53bb8029d2494', 'type': 'pool'}]
-            }
-        }
-    }
-}
