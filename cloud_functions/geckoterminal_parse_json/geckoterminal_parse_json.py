@@ -194,6 +194,32 @@ def upload_metadata(main_json_data, info_json_data, bigquery_client):
     if main_json_data and 'relationships' in main_json_data['data']:
         top_pools = main_json_data['data']['relationships'].get('top_pools', {}).get('data', [])
 
+        # 1. Retrieve total_supply and decimals from the respective JSON data
+        if main_json_data:
+            raw_total_supply = main_json_data['data']['attributes'].get('total_supply', None)
+        else:
+            raw_total_supply = None
+
+        if info_json_data:
+            decimals = info_json_data['data']['attributes'].get('decimals', None)
+        else:
+            decimals = None
+
+        # 2. Calculate total_supply_adjusted by dividing raw_total_supply by 10^decimals
+        if raw_total_supply is not None and decimals is not None:
+            try:
+                total_supply_adjusted = float(raw_total_supply) / (10 ** int(decimals))
+
+                # 3. If total_supply_adjusted exceeds 10^20, set it to None
+                # numbers above this scale cause type errors and are likely bad geckoterminal data
+                if total_supply_adjusted > 10**20:
+                    total_supply_adjusted = None
+
+            except (ValueError, TypeError):
+                total_supply_adjusted = None  # Handle cases where casting fails
+        else:
+            total_supply_adjusted = None  # Set to None if total_supply or decimals are missing
+
     # Prepare the aggregated data for upload
     # pylint: disable=C0301  # Disables line-length warnings for the following lines
     rows_to_insert = [{
@@ -210,12 +236,8 @@ def upload_metadata(main_json_data, info_json_data, bigquery_client):
         'discord_url': info_json_data['data']['attributes'].get('discord_url', None) if info_json_data else None,
         'telegram_handle': info_json_data['data']['attributes'].get('telegram_handle', None) if info_json_data else None,
         'twitter_handle': info_json_data['data']['attributes'].get('twitter_handle', None) if info_json_data else None,
-
-        # total supply needs to be divided by decimals to reflect whole tokens
-        'total_supply': (main_json_data['data']['attributes'].get('total_supply', None) / (10 ** info_json_data['data']['attributes'].get('decimals', 0)))
-                        if main_json_data and info_json_data and main_json_data['data']['attributes'].get('total_supply', None) and info_json_data['data']['attributes'].get('decimals', None) is not None
-                        else None,
-
+        'total_supply_raw': main_json_data['data']['attributes'].get('total_supply', None) if main_json_data else None,
+        'total_supply': total_supply_adjusted,
         'top_pools': top_pools,
         'main_json_status': main_json_status,
         'info_json_status': info_json_status,

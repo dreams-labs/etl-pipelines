@@ -69,10 +69,11 @@ def rebuild_coin_facts_metadata(request):  # pylint: disable=unused-argument  # 
                 ,COALESCE(cg.name, gt.name) AS name
 
                 -- Coalesce with logic to prevent 0 values from overwriting non-zero values
-                ,CASE
-                    WHEN cg.total_supply IS NOT NULL AND cg.total_supply != 0 THEN cg.total_supply
-                    ELSE gt.total_supply
-                END AS total_supply
+                ,CAST(
+                    CASE
+                        WHEN cg.total_supply IS NOT NULL AND cg.total_supply != 0 THEN cg.total_supply
+                        ELSE gt.total_supply
+                    END AS numeric) AS total_supply
 
                 ,CASE
                     WHEN cg.decimals IS NOT NULL AND cg.decimals != 0 THEN cg.decimals

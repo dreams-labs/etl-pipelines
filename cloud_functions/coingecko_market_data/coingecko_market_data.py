@@ -46,7 +46,11 @@ def update_coin_market_data_coingecko(request):  # pylint: disable=unused-argume
 
             # store iteration-specific variables
             coingecko_id = updates_df['coingecko_id'][i]
-            most_recent_record = updates_df['most_recent_record'][i]
+
+            # prepare pandas date series of existing records to filter to only new rows
+            dates_with_records = updates_df[updates_df['coingecko_id']==coingecko_id]['all_dates']
+            dates_with_records = pd.Series([date for date in dates_with_records.iloc[0]])
+            dates_with_records = pd.to_datetime(dates_with_records).dt.tz_localize('UTC')
 
             # retrieve coingecko market data
             logger.info('retreiving coingecko data for %s...', coingecko_id)
@@ -58,7 +62,7 @@ def update_coin_market_data_coingecko(request):  # pylint: disable=unused-argume
                                 , str(market_df.shape[0]), coingecko_id)
 
                     # format and filter market data to prepare for upload
-                    market_df = format_and_add_columns(market_df, coingecko_id, most_recent_record)
+                    market_df = format_and_add_columns(market_df, coingecko_id, dates_with_records)
                     all_market_data.append(market_df)
 
                 else:
@@ -115,11 +119,14 @@ def retrieve_updates_df():
 
         select cds.coingecko_id
         ,cds.most_recent_record
+        ,array_agg(cmd.date order by cmd.date asc) as all_dates
         from coingecko_data_status cds
-        where (
-            cds.most_recent_record is null
-            or cds.most_recent_record < (current_date('UTC') - 2)
-        )
+        join `etl_pipelines.coin_market_data_coingecko` cmd on cmd.coingecko_id = cds.coingecko_id
+        --where (
+        --    cds.most_recent_record is null
+        --    or cds.most_recent_record < (current_date('UTC') - 2)
+        --)
+        group by 1,2
         '''
 
     updates_df = dgc().run_sql(query_sql)
@@ -209,59 +216,58 @@ def replace_unix_timestamp(lst):
 
 
 
-def format_and_add_columns(df, coingecko_id, most_recent_record):
+def format_and_add_columns(df, coingecko_id, dates_with_records):
     '''
-    converts json data from the coingecko api into a table-formatted dataframe by converting \
-        columns of tuples into standardized columns that match the bigquery table format
+    Converts json data from the coingecko api into a table-formatted dataframe by converting
+    columns of tuples into standardized columns that match the bigquery table format.
 
     params:
         df (pandas.DataFrame): df of coingecko market data
         coingecko_id (str): coingecko id of coin
-        most_recent_record (datetime): most recent record in coin_market_data_coingecko
+        dates_with_records (pandas.Series): series of all dates with records for the coingecko_id
+            in etl_pipelines.coin_market_data_coingecko
 
     returns:
         df (pandas.DataFrame): formatted df of market data
     '''
-    # loop through each row in the DataFrame and apply the function
+    # Loop through each row in the DataFrame and apply the function
     for index, row in df.iterrows():
-        # formatting unix timestamp of prices column
+        # Formatting unix timestamp of prices column
         df.at[index, 'prices'] = replace_unix_timestamp(row['prices'])
 
-        # removing the unix timestamps from the columns
+        # Removing the unix timestamps from the columns
         df.at[index, 'market_caps'] = row['market_caps'][1]
         df.at[index, 'total_volumes'] = row['total_volumes'][1]
 
-    df = df.assign(date=[i[0] for i in df['prices']],
-                    prices=[i[1] for i in df['prices']],
-                    coingecko_id = coingecko_id)
+    df = df.assign(
+        date=[i[0] for i in df['prices']],
+        prices=[i[1] for i in df['prices']],
+        coingecko_id=coingecko_id
+    )
 
-    # rearranging and renaming columns
+    # Rearranging and renaming columns
     df = df[['coingecko_id', 'date', 'prices', 'market_caps', 'total_volumes']]
     df.columns = ['coingecko_id', 'date', 'price', 'market_cap', 'volume']
 
-    # convert market_cap and volumes to integers
+    # Convert market_cap and volumes to integers
     df['market_cap'] = df['market_cap'].astype(int)
     df['volume'] = df['volume'].astype(int)
 
-    # convert date column to utc datetime
+    # Convert date column to UTC datetime
     df['date'] = pd.to_datetime(df['date'])
     df['date'] = df['date'].dt.tz_localize('UTC')
 
-    # find and drop the index of the row with the most recent date to avoid partial date data
+    # Find and drop the row with the most recent date to avoid partial date data
     max_date_index = df['date'].idxmax()
     df = df.drop(max_date_index)
 
-    # round date to nearest day
+    # Round date to nearest day
     df['date'] = pd.to_datetime(df['date']).dt.floor('D')
 
-    # if records already exist in the database, remove them from the df
-    if not pd.isna(most_recent_record):
-        most_recent_record = most_recent_record.to_pydatetime().replace(tzinfo=utc)
-        df = df[df['date'] > most_recent_record]
+    # Filter out records that already exist in the database based on dates_with_records
+    df = df[~df['date'].isin(dates_with_records)]
 
-    # drop duplicate dates if exists. this only occurs if a coin is removed from coingecko, e.g.:
-    # https://www.coingecko.com/en/coins/serum-ser
-    # https://www.coingecko.com/en/coins/chart-roulette
+    # Drop duplicate dates if they exist
     df = df.drop_duplicates(subset='date', keep='last')
 
     return df
