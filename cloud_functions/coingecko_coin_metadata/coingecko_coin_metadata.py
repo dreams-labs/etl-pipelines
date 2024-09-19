@@ -1,20 +1,20 @@
 """
-This module is designed to retrieve and store metadata for cryptocurrency tokens from Coingecko. 
+This module is designed to retrieve and store metadata for cryptocurrency tokens from Coingecko.
 It consists of three interconnected functions:
 
-1. `retrieve_coingecko_metadata`: The main entry point that queries a list of tokens, attempts to 
-    fetch their metadata from Coingecko, and stores the results. It processes each token 
+1. `retrieve_coingecko_metadata`: The main entry point that queries a list of tokens, attempts to
+    fetch their metadata from Coingecko, and stores the results. It processes each token
     individually and manages rate-limiting between API calls.
-   
+
 2. `coingecko_metadata_search`: Called by `retrieve_coingecko_metadata`, this function attempts to
     look up a token's metadata on Coingecko, stores the metadata in Google Cloud Storage (GCS), and
     logs the results in BigQuery for future reference.
 
-3. `fetch_coingecko_data`: A helper function that handles the actual API call to Coingecko, 
+3. `fetch_coingecko_data`: A helper function that handles the actual API call to Coingecko,
     including retrying in the event of rate limits (HTTP 429). This function is invoked by
     `coingecko_metadata_search` to retrieve the metadata for each token.
 
-The three functions work together to ensure that token metadata is fetched, stored, and logged 
+The three functions work together to ensure that token metadata is fetched, stored, and logged
 efficiently while respecting Coingecko's API rate limits and handling errors gracefully.
 """
 import time
@@ -37,8 +37,8 @@ logger = dc.setup_logger()
 @functions_framework.http
 def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # noqa: F841
     '''
-    Queries BigQuery to obtain a list of coins that need metadata and attempts to match them and 
-    store metadata by calling coingecko_metadata_search() for each. 
+    Queries BigQuery to obtain a list of coins that need metadata and attempts to match them and
+    store metadata by calling coingecko_metadata_search() for each.
     '''
 
     # pull list of coins to attempt
@@ -49,12 +49,16 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
         from core.coins cc
         join core.chains ch on ch.chain_id = cc.chain_id
         left join etl_pipelines.coin_coingecko_ids cgi on cgi.coin_id = cc.coin_id
-            and cgi.search_log in ( -- this join filter allows coins that failed due to api errors to be reattempted
-                "search successful", -- do not reattempt coins that are already matched
-                "{'error': 'coin not found'}" -- do not reattempt addresses that could not be found
-            )
-        where cc.address is not null -- removes coins without addresses
+            and cgi.search_log = "{'error': 'coin not found'}"
+        left join etl_pipelines.coin_coingecko_metadata cgm on cgm.coingecko_id = cc.coingecko_id
+        -- don't include coins without addresses
+        where cc.address is not null
+
+        -- don't reattempt addresses that couldn't be found
         and cgi.coin_id is null
+
+        -- don't attempt coins that already have metadata
+        and cgm.coingecko_id is null
         group by 1,2,3
         '''
 

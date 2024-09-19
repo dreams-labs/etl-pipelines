@@ -60,9 +60,6 @@ def update_geckoterminal_market_data(request):  # pylint: disable=unused-argumen
     return 'all done'
 
 
-from dreams_core.googlecloud import GoogleCloud as dgc
-
-
 def retrieve_updates_df():
     '''
     pulls a list of tokens in need of a geckoterminal market data update. this is defined as \
@@ -105,8 +102,25 @@ def retrieve_updates_df():
     return updates_df
 
 
-updates_df = retrieve_updates_df()
+# Function to extract blockchain/address pairs from the DataFrame
+def retrieve_all_pairs(updates_df):
+    """
+    Extracts blockchain and token address pairs from the updates DataFrame.
 
+    Parameters:
+    updates_df (DataFrame): The df containing 'chain_text_geckoterminal' and 'address' columns.
+
+    Returns:
+    list: A list of blockchain and address pairs.
+    """
+    all_blockchain_address_pairs = []
+
+    for index, row in updates_df.iterrows():
+        chain_text_geckoterminal = row['chain_text_geckoterminal']
+        address = row['address']
+        all_blockchain_address_pairs.append([chain_text_geckoterminal, address])
+
+    return all_blockchain_address_pairs
 
 
 # Function to retrieve the pool address for a given blockchain and token address
@@ -136,6 +150,8 @@ def retrieve_pool_address(blockchain, address):
     except requests.RequestException:
         return "couldn't retrieve the pool address"
 
+
+
 # Function to retrieve all pool addresses for a list of blockchain/address pairs
 def retrieve_all_pool_addresses(all_blockchain_address_pairs):
     """
@@ -156,25 +172,7 @@ def retrieve_all_pool_addresses(all_blockchain_address_pairs):
 
     return all_pairs_with_pools
 
-# Function to extract blockchain/address pairs from the DataFrame
-def retrieve_all_pairs(updates_df):
-    """
-    Extracts blockchain and token address pairs from the updates DataFrame.
 
-    Parameters:
-    updates_df (DataFrame): The DataFrame containing 'chain_text_geckoterminal' and 'address' columns.
-
-    Returns:
-    list: A list of blockchain and address pairs.
-    """
-    all_blockchain_address_pairs = []
-
-    for index, row in updates_df.iterrows():
-        chain_text_geckoterminal = row['chain_text_geckoterminal']
-        address = row['address']
-        all_blockchain_address_pairs.append([chain_text_geckoterminal, address])
-
-    return all_blockchain_address_pairs
 
 # Function to convert a Unix timestamp to a human-readable datetime format
 def unix_to_datetime(unix_timestamp):

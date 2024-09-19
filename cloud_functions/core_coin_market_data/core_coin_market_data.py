@@ -60,6 +60,9 @@ def insert_coingecko_market_data():
     '''
 
     query_sql = '''
+
+        truncate table core.coin_market_data;
+
         insert into core.coin_market_data (
 
         select md.date
@@ -92,11 +95,7 @@ def insert_coingecko_market_data():
         from core.coins co
         join etl_pipelines.coin_market_data_coingecko md on md.coingecko_id = co.coingecko_id
 
-        -- don't insert rows that already have data
-        left join core.coin_market_data cmd on cmd.coin_id = co.coin_id and cmd.date = md.date
-        where cmd.date is null
-
-        )
+        );
         '''
 
     dgc().run_sql(query_sql)
