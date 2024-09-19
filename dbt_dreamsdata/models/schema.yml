@@ -84,6 +84,10 @@ models:
         description: "Geckoterminal's coin id per their API"
         data_tests:
           - not_null
+      - name: close
+        description: "daily closing price"
+        data_tests:
+          - not_null
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
@@ -101,6 +105,10 @@ models:
           - not_null
       - name: coingecko_id
         description: "The Coingecko ID of the coin"
+        data_tests:
+          - not_null
+      - name: price
+        description: "daily price"
         data_tests:
           - not_null
     data_tests:

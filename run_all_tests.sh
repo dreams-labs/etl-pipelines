@@ -5,6 +5,6 @@ set -e
 pytest
 
 # Run dbt tests
-cd ../dbt_dreamsdata/
+cd ./dbt_dreamsdata/
 dbt run
 dbt test
