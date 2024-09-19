@@ -78,8 +78,12 @@ models:
     columns:
       - name: date
         description: "The date of the market data"
+        data_tests:
+          - not_null
       - name: coingecko_id
         description: "The Coingecko ID of the coin"
+        data_tests:
+          - not_null
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
