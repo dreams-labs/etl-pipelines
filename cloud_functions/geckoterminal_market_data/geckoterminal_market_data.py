@@ -80,7 +80,7 @@ def update_geckoterminal_market_data(request):  # pylint: disable=unused-argumen
     # ---------------------------------------------------------------------------
     new_market_data_df = filter_new_market_data(updates_df, combined_market_df)
 
-    if not combined_market_df.empty:
+    if not new_market_data_df.empty:
         upload_combined_market_df(new_market_data_df)
 
     return "finished updating geckoterminal market data"
