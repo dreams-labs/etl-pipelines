@@ -5,7 +5,7 @@ import functions_framework
 import dreams_core.core as dc
 from dreams_core.googlecloud import GoogleCloud as dgc
 
-# set up logger at the module level
+# set at logger at the module level
 logger = dc.setup_logger()
 
 

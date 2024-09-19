@@ -241,6 +241,7 @@ def refresh_core_coins():
             ,cfcg.decimals as decimals
             ,cfcg.total_supply as total_supply
             ,cfcg.coingecko_id as coingecko_id
+            ,cfcg.geckoterminal_id as geckoterminal_id
             ,case when cmd.coin_id is not null then TRUE else FALSE end as has_market_data
             ,case when cwt.coin_id is not null then TRUE else FALSE end as has_wallet_transfer_data
             ,ci.created_at
