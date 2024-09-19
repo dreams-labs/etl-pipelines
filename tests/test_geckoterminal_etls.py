@@ -8,6 +8,7 @@ tests used to audit the files in the etl-pipelines repository
 # pylint: disable=W0612 # unused variables (due to test reusing functions with 2 outputs)
 # pylint: disable=W0621 # redefining from outer scope triggering on pytest fixtures
 
+
 import sys
 import os
 from unittest.mock import patch, Mock, MagicMock
@@ -16,11 +17,12 @@ import pytest
 from dotenv import load_dotenv
 from dreams_core import core as dc
 
-# project modules
+# Project Modules
+# pyright: reportMissingImports=false
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../cloud_functions/geckoterminal_coin_metadata')))
-import geckoterminal_coin_metadata as gtm # type: ignore[reportMissingImports]
+import geckoterminal_coin_metadata as gtm
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../cloud_functions/geckoterminal_parse_json')))
-import geckoterminal_parse_json as gpj # type: ignore[reportMissingImports]
+import geckoterminal_parse_json as gpj
 
 load_dotenv()
 logger = dc.setup_logger()
