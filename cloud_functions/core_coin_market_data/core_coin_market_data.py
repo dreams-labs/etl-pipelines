@@ -1,16 +1,39 @@
 '''
 cloud function that runs a query to refresh the data in bigquery table core.coin_market_data
 '''
-import datetime
-import time
 import logging
-import os
-from pytz import utc
-import pandas as pd
 import functions_framework
-from google.cloud import bigquery_storage
 from dreams_core.googlecloud import GoogleCloud as dgc
 
+
+@functions_framework.http
+def update_coin_market_data(request): # pylint: disable=unused-argument  # noqa: F841
+    '''
+    runs all functions in sequence to refresh core.coin_market_data
+    '''
+    # configure logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
+        datefmt='%d/%b/%Y %H:%M:%S'
+        )
+    logger = logging.getLogger(__name__)
+
+    # retrieve initial record count
+    initial_records = get_coin_market_data_record_count()
+    logger.info('initial core.coin_market_data records: %s', initial_records)
+
+    # Insert new coingecko market data records to core.coin_market_data
+    insert_coingecko_market_data()
+
+    # Calculate the number of records added
+    updated_records = get_coin_market_data_record_count()
+    new_records = updated_records - initial_records
+
+    logger.info('updated core.coin_market_data records: %s', updated_records)
+    logger.info('refreshed core.coin_market_data with %s new coingecko records.', new_records)
+
+    return f'{{"status":"200", "new_records": "{new_records}"}}'
 
 
 def get_coin_market_data_record_count():
@@ -32,11 +55,14 @@ def get_coin_market_data_record_count():
 
 def insert_coingecko_market_data():
     '''
-    adds new records in etl_pipelines.coin_market_data_coingecko to core.coin_market_data after 
+    adds new records in etl_pipelines.coin_market_data_coingecko to core.coin_market_data after
     normalizing and filling relevant fields
     '''
 
     query_sql = '''
+
+        truncate table core.coin_market_data;
+
         insert into core.coin_market_data (
 
         select md.date
@@ -46,65 +72,30 @@ def insert_coingecko_market_data():
         ,md.price
 
         -- use fdv if market cap data isn't available
-        ,case 
+        ,case
             when md.market_cap > 0 then md.market_cap
-            else cast(md.price*cgf.total_supply as int64)
+            else cast(md.price*co.total_supply as int64)
             end as market_cap
 
         -- calculate fdv using total supply
-        ,cast(md.price*cgf.total_supply as int64) as fdv
+        ,cast(md.price*co.total_supply as int64) as fdv
 
         -- calculate circulating supply using market cap
         ,case
             when md.market_cap > 0 then cast(md.market_cap/md.price as int64)
-            else cast(cgf.total_supply as int64)
+            else cast(co.total_supply as int64)
             end as circulating_supply
 
         -- total supply retrieved from coingecko metadata tables
-        ,cast(cgf.total_supply as int64) as total_supply
+        ,cast(co.total_supply as int64) as total_supply
 
         ,md.volume
         ,'coingecko' as data_source
         ,md.updated_at
         from core.coins co
-        join core.coin_facts_coingecko cgf on cgf.coin_id = co.coin_id
-        join etl_pipelines.coin_market_data_coingecko md on md.coin_id = co.coin_id
+        join etl_pipelines.coin_market_data_coingecko md on md.coingecko_id = co.coingecko_id
 
-        -- don't insert rows that already have data
-        left join core.coin_market_data cmd on cmd.coin_id = md.coin_id and cmd.date = md.date
-        where cmd.date is null
-
-        )
+        );
         '''
 
     dgc().run_sql(query_sql)
-
-
-
-@functions_framework.http
-def update_coin_market_data(request):
-    '''
-    runs all functions in sequence to refresh core.coin_market_data
-    '''
-    # configure logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
-        datefmt='%d/%b/%Y %H:%M:%S'
-        )
-    logger = logging.getLogger(__name__)
-
-    # retrieve initial record count
-    initial_records = get_coin_market_data_record_count()
-    logger.info(f'initial core.coin_market_data records: {initial_records}')
-
-    # insert new coingecko market data records to core.coin_market_data
-    insert_coingecko_market_data()
-
-    # calculate the number of records added
-    updated_records = get_coin_market_data_record_count()
-    new_records = updated_records - initial_records
-    logger.info(f'updated core.coin_market_data records: {updated_records}')
-    logger.info(f'refreshed core.coin_market_data with {new_records} new coingecko records.')
-
-    return f'{{"status":"200", "new_records": "{new_records}"}}'

@@ -14,3 +14,6 @@ __pycache__/
 logs/dbt.log
 dbt_dreamsdata/logs
 dbt_dreamsdata/target
+dbt_dreamsdata/dbt_packages
+/logs
+logs/dbt.log

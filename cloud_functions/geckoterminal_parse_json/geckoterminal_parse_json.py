@@ -57,7 +57,10 @@ def parse_geckoterminal_json(request):  # pylint: disable=unused-argument  # noq
 
     # Process each coin in parallel using ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(process_coin, coin, storage_client, bigquery_client) for coin in coins_to_process]
+        futures = [
+            executor.submit(process_coin, coin, storage_client, bigquery_client)
+            for coin in coins_to_process
+        ]
         for future in futures:
             future.result()  # Ensure exceptions are raised
 
@@ -105,13 +108,19 @@ def process_coin(coin, storage_client, bigquery_client):
     """
     try:
         # Fetch both JSON objects
-        main_json_data = fetch_coin_json(coin, storage_client, CONFIG['main_metadata_path'], '_main')
-        info_json_data = fetch_coin_json(coin, storage_client, CONFIG['info_metadata_path'], '_info')
+        main_json_data = fetch_coin_json(coin,storage_client,CONFIG['main_metadata_path'],'_main')
+        info_json_data = fetch_coin_json(coin,storage_client,CONFIG['info_metadata_path'],'_info')
 
+        # Upload metadata to BigQuery
         upload_metadata(main_json_data, info_json_data, bigquery_client)
 
-    except Exception as e:
-        logger.error('Error processing coin %s: %s', coin, str(e))
+    except FileNotFoundError as fnf_error:
+        logger.error('File not found for coin %s: %s', coin, str(fnf_error))
+    except KeyError as key_error:
+        logger.error('Key error in coin metadata for %s: %s', coin, str(key_error))
+    except Exception as e: # pylint: disable=W0718
+        # Generic fallback for any other unhandled exceptions
+        logger.error('Unexpected error while processing coin %s: %s', coin, str(e))
 
 
 
@@ -185,9 +194,35 @@ def upload_metadata(main_json_data, info_json_data, bigquery_client):
     if main_json_data and 'relationships' in main_json_data['data']:
         top_pools = main_json_data['data']['relationships'].get('top_pools', {}).get('data', [])
 
+        # 1. Retrieve total_supply and decimals from the respective JSON data
+        if main_json_data:
+            raw_total_supply = main_json_data['data']['attributes'].get('total_supply', None)
+        else:
+            raw_total_supply = None
+
+        if info_json_data:
+            decimals = info_json_data['data']['attributes'].get('decimals', None)
+        else:
+            decimals = None
+
+        # 2. Calculate total_supply_adjusted by dividing raw_total_supply by 10^decimals
+        if raw_total_supply is not None and decimals is not None:
+            try:
+                total_supply_adjusted = float(raw_total_supply) / (10 ** int(decimals))
+
+                # 3. If total_supply_adjusted exceeds 10^20, set it to None
+                # numbers above this scale cause type errors and are likely bad geckoterminal data
+                if total_supply_adjusted > 10**20:
+                    total_supply_adjusted = None
+
+            except (ValueError, TypeError):
+                total_supply_adjusted = None  # Handle cases where casting fails
+        else:
+            total_supply_adjusted = None  # Set to None if total_supply or decimals are missing
+
     # Prepare the aggregated data for upload
+    # pylint: disable=C0301  # Disables line-length warnings for the following lines
     rows_to_insert = [{
-        'coin_id': main_json_data['data']['id'] if main_json_data else None,
         'geckoterminal_id': main_json_data['data']['id'] if main_json_data else None,
         'name': info_json_data['data']['attributes'].get('name', None) if info_json_data else None,
         'symbol': info_json_data['data']['attributes'].get('symbol', None) if info_json_data else None,
@@ -201,7 +236,8 @@ def upload_metadata(main_json_data, info_json_data, bigquery_client):
         'discord_url': info_json_data['data']['attributes'].get('discord_url', None) if info_json_data else None,
         'telegram_handle': info_json_data['data']['attributes'].get('telegram_handle', None) if info_json_data else None,
         'twitter_handle': info_json_data['data']['attributes'].get('twitter_handle', None) if info_json_data else None,
-        'total_supply': main_json_data['data']['attributes'].get('total_supply', None) if main_json_data else None,
+        'total_supply_raw': main_json_data['data']['attributes'].get('total_supply', None) if main_json_data else None,
+        'total_supply': total_supply_adjusted,
         'top_pools': top_pools,
         'main_json_status': main_json_status,
         'info_json_status': info_json_status,
@@ -213,9 +249,11 @@ def upload_metadata(main_json_data, info_json_data, bigquery_client):
     # Upload to BigQuery
     errors = bigquery_client.insert_rows_json(table_id, rows_to_insert)
     if not errors:
-        logger.info("Successfully inserted metadata for coin %s", main_json_data['data']['id'])
+        logger.info("Successfully inserted metadata for coin %s",
+                    main_json_data['data']['id'])
     else:
-        logger.error("Error inserting metadata for coin %s: %s", main_json_data['data']['id'], errors)
+        logger.error("Error inserting metadata for coin %s: %s",
+                     main_json_data['data']['id'], errors)
 
 def insert_rows(bigquery_client, table_id, rows_to_insert):
     """
