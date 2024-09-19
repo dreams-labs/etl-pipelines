@@ -22,8 +22,8 @@ def rebuild_coin_facts_metadata(request):  # pylint: disable=unused-argument  # 
             with geckoterminal_coin_ids as (
                 select id.geckoterminal_id
                 ,id.coin_id
-                ,row_number() over (partition by geckoterminal_id order by search_date desc) as rn
-                from `core_etl_pipelines.coin_geckoterminal_ids` id
+                ,row_number() over (partition by id.geckoterminal_id order by search_date desc) as rn
+                from `etl_pipelines.coin_geckoterminal_ids` id
                 join core.coins c on c.coin_id = id.coin_id
                 where search_successful = True
             ),

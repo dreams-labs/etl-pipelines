@@ -1,5 +1,5 @@
-# Workflow to retrieve market data from CoinGecko and update core coin market data 
-# via HTTP GET requests, with OIDC authentication.
+# Workflow to retrieve market data from CoinGecko and Geckoterminal, then update the
+# core.coin_market_data table
 main:
     steps:
     - init:
@@ -7,14 +7,30 @@ main:
         - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
         - service_account: western-verve-411004@appspot.gserviceaccount.com
 
-    - retrieveCoingeckoMarketData:
-        # update the etl_pipelines.update_coin_market_data_coingecko table
-        call: http.get
-        args:
-            url: https://coingecko-market-data-954736581165.us-west1.run.app
-            auth:
-                type: OIDC
-            timeout: 1800
+    - retrieveMarketData:
+        parallel:
+            branches:
+            - coingeckoSequence:
+                steps:
+                - retrieveCoingeckoMarketData:
+                    # update the etl_pipelines.update_coin_market_data_coingecko table
+                    call: http.get
+                    args:
+                        url: https://coingecko-market-data-954736581165.us-west1.run.app
+                        auth:
+                            type: OIDC
+                        timeout: 1800
+
+            - geckoterminalSequence:
+                steps:
+                - retrieveGeckoterminalMarketData:
+                    # update the etl_pipelines.update_coin_market_data_coingecko table
+                    call: http.get
+                    args:
+                        url: https://coingecko-market-data-954736581165.us-west1.run.app
+                        auth:
+                            type: OIDC
+                        timeout: 1800
 
     - updateCoreCoinMarketData:
         # rebuild core.coin_market_data
@@ -26,4 +42,4 @@ main:
         result: resp
 
     - returnOutput:
-            return: '${resp}'
+        return: '${resp}'
