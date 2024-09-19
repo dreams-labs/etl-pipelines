@@ -267,7 +267,9 @@ def format_and_add_columns(df, coingecko_id, dates_with_records):
     # Filter out records that already exist in the database based on dates_with_records
     df = df[~df['date'].isin(dates_with_records)]
 
-    # Drop duplicate dates if they exist
+    # drop duplicate dates if exists. this only occurs if a coin is removed from coingecko, e.g.:
+    # https://www.coingecko.com/en/coins/serum-ser
+    # https://www.coingecko.com/en/coins/chart-roulette
     df = df.drop_duplicates(subset='date', keep='last')
 
     return df
