@@ -28,6 +28,14 @@ models:
         data_tests:
           - not_null
           - unique
+      - name: coingecko_id
+        description: "Coingecko's unique ID"
+        data_tests:
+          - unique
+      - name: geckoterminal_id
+        description: "Geckoterminal's unique ID"
+        data_tests:
+          - unique
 
   - name: coin_facts_coingecko
     description: "metadata from coingecko only"
@@ -93,6 +101,17 @@ models:
           combination_of_columns:
             - date
             - geckoterminal_id
+
+  - name: coin_coingecko_metadata
+    description: "Metadata for Coingecko coins"
+    meta:
+      schema: etl_pipelines  # Documenting the dataset (etl_pipelines)
+    columns:
+      - name: coingecko_id
+        description: "coingecko_id"
+        data_tests:
+          - not_null
+          - unique
 
   - name: coin_market_data_coingecko
     description: "Coingecko market data"
