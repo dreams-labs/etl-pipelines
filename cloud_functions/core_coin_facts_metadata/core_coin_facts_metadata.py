@@ -63,7 +63,7 @@ def rebuild_coin_facts_metadata(request):  # pylint: disable=unused-argument  # 
 
             SELECT
                 COALESCE(cg.coin_id, gt.coin_id) AS coin_id
-                ,COALESCE(cg.coingecko_id, gt.coingecko_coin_id) AS coingecko_id
+                ,cg.coingecko_id  -- coalescing with gt.coingecko_coin_id creates duplicates
                 ,gt.geckoterminal_id
                 ,COALESCE(cg.symbol, gt.symbol) AS symbol
                 ,COALESCE(cg.name, gt.name) AS name
