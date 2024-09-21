@@ -67,7 +67,7 @@ def rebuild_coin_facts_metadata(request):  # pylint: disable=unused-argument  # 
                 ,gt.geckoterminal_id
                 ,COALESCE(cg.symbol, gt.symbol) AS symbol
                 ,COALESCE(cg.name, gt.name) AS name
-                ,cg.category
+                ,cg.categories
 
 
                 -- Coalesce with logic to prevent 0 values from overwriting non-zero values

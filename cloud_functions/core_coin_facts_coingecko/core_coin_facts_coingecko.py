@@ -92,9 +92,11 @@ def rebuild_coin_facts_coingecko(request):  # pylint: disable=unused-argument  #
         )
 
         ,cg_categories as (
-        select distinct coingecko_id,category
-        from etl_pipelines.coin_coingecko_categories
-        where coingecko_rank = 1 and updated_at is not null
+          select cgc.coingecko_id
+          ,ARRAY_AGG(distinct xw.category_adj IGNORE NULLS) AS categories
+          from etl_pipelines.coin_coingecko_categories cgc
+          join reference.coingecko_category_crosswalk xw on xw.coingecko_category = cgc.category
+          group by 1
         )
 
         ,stg_coingecko_facts as (
@@ -114,7 +116,7 @@ def rebuild_coin_facts_coingecko(request):  # pylint: disable=unused-argument  #
             ,cgc.blockchain
             ,cgc.address
             ,cgc.decimals
-            ,cgct.category
+            ,cgct.categories
         from coingecko_coins cc
         join cg_metadata cm on cc.coingecko_id = cm.coingecko_id
         join cg_contracts cgc on cgc.coingecko_id = cc.coingecko_id
