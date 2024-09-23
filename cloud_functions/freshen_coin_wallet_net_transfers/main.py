@@ -2,6 +2,8 @@
 provides updated whale chart data by following this sequence:
 1. updates the dune table net_transfers_state with the current state of the bigquery table \
     etl_pipelines.coin_wallet_net_transfers
+2. generates a dune query for all blockchains in need of updates and unions them together
+3. retreives the dune results and uploads them to bigquery
 
 '''
 import datetime
