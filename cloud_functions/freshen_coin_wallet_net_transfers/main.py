@@ -87,8 +87,8 @@ def update_dune_freshness_table():
         ,current_timestamp() as updated_at
         from (
             select * from existing_records
-            -- union all
-            -- select * from new_records
+            union all
+            select * from new_records
         )
     '''
     freshness_df = dgc().run_sql(query_sql)
@@ -149,7 +149,7 @@ def generate_net_transfers_update_query(dune_chains):
                 where batch_recency = 1
             ),
 
-            -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
+            -- filter the transfers table on indexed columns (block_date) to improve subsequent query performance
             transfers_filtered as (
                 -- find the earliest possible date that we need data for
                 with most_out_of_date as (
@@ -158,21 +158,20 @@ def generate_net_transfers_update_query(dune_chains):
                     where ts.chain = 'solana'
                 )
                 select 'solana' as chain
-                ,t.block_time
+                ,t.block_date
                 ,t.from_token_account
                 ,t.to_token_account
                 ,t.token_mint_address
                 ,t.amount
                 from tokens_solana.transfers t
                 -- remove all rows earlier than the earliest possible relevant date
-                where date_trunc('day', t.block_time at time zone 'UTC') > (select date from most_out_of_date)
+                where t.block_date > (select date from most_out_of_date)
                 -- remove rows from today since the daily net totals aren't finalized
-                and date_trunc('day', t.block_time at time zone 'UTC') <
-                    date(current_timestamp at time zone 'UTC')
+                and t.block_date < date(current_timestamp at time zone 'UTC')
             ),
             transfers as (
                 select t.chain
-                ,date_trunc('day', t.block_time at time zone 'UTC') as date
+                ,t.block_date as date
                 ,t.from_token_account as address
                 ,-cast(t.amount as double) as amount
                 ,token_mint_address as contract_address
@@ -180,12 +179,12 @@ def generate_net_transfers_update_query(dune_chains):
                 join current_net_transfers_freshness ts
                     on ts.token_address = t.token_mint_address
                     and ts.chain = t.chain
-                    and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
+                    and t.block_date > cast(ts.freshest_date as date)
 
                 union all
 
                 select t.chain
-                ,date_trunc('day', t.block_time at time zone 'UTC') as date
+                ,t.block_date as date
                 ,t.to_token_account as address
                 ,cast(t.amount as double) as amount
                 ,token_mint_address as contract_address
@@ -193,7 +192,7 @@ def generate_net_transfers_update_query(dune_chains):
                 join current_net_transfers_freshness ts
                     on ts.token_address = t.token_mint_address
                     and ts.chain = t.chain
-                    and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
+                    and t.block_date > cast(ts.freshest_date as date)
             ),
             daily_net_transfers as (
                 select chain
