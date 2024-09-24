@@ -27,7 +27,7 @@ main:
                     # update the etl_pipelines.update_coin_market_data_coingecko table
                     call: http.get
                     args:
-                        url: https://coingecko-market-data-954736581165.us-west1.run.app
+                        url: https://geckoterminal-coin-market-data-954736581165.us-west1.run.app
                         auth:
                             type: OIDC
                         timeout: 1800

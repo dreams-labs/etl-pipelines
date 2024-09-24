@@ -73,7 +73,6 @@ models:
         description: "trading volume"
         data_tests:
         - not_null
-
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:
@@ -148,3 +147,32 @@ models:
           combination_of_columns:
             - date
             - coingecko_id
+
+  - name: coin_wallet_net_transfers
+    description: "daily transfer data from dune"
+    meta:
+      schema: etl_pipelines
+    columns:
+      - name: date
+        description: "transfer date"
+        data_tests:
+          - not_null
+      - name: chain_text_source
+        description: "dunesql blockchain alias"
+        data_tests:
+          - not_null
+      - name: token_address
+        description: "token address"
+        data_tests:
+          - not_null
+      - name: wallet_address
+        description: "wallet address"
+        data_tests:
+          - not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - date
+            - chain_text_source
+            - token_address
+            - wallet_address

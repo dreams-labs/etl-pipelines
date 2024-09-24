@@ -36,7 +36,8 @@ def freshen_coin_wallet_net_transfers(request):  # pylint: disable=W0613
     full_query = generate_net_transfers_update_query(update_chains)
 
     # retrieve the fresh dune data using the generated query
-    transfers_df = get_fresh_dune_data(full_query)
+    transfers_json = get_fresh_dune_data(full_query)
+    transfers_df = pd.DataFrame(transfers_json)
 
     # upload the fresh dune data to bigquery
     append_to_bigquery_table(freshness_df,transfers_df)
@@ -75,12 +76,27 @@ def update_dune_freshness_table():
             ,cast('2000-01-01' as datetime) as freshest_date
             from core.coins c
             join core.chains ch on ch.chain_id = c.chain_id
+            join (
+                select coin_id
+                ,max(coalesce(market_cap,price*total_supply)) as max_market_cap
+                from core.coin_market_data
+                group by 1
+            ) cap_size on cap_size.coin_id = c.coin_id
             left join existing_records e on e.token_address = c.address
                 and e.chain = ch.chain_text_dune
-            where ch.chain_text_dune is not null -- only include dune-supported blockchains
-            and e.token_address is null -- only include coins without existing transfer data
-            and c.decimals is not null -- currently decimals are required to run the dune queries
-            limit 25
+
+            -- new coins don't have existing transfer data
+            where e.token_address is null
+
+             -- new coins must have dune-supported blockchains
+            and ch.chain_text_dune is not null
+
+            -- new coins currently need decimal data to run the dune queries
+            and c.decimals is not null
+
+            -- max market cap is used to prioritize smaller coins with lower credit cost
+            order by cap_size.max_market_cap asc
+            limit 40
         )
         select chain
         ,token_address
@@ -88,9 +104,34 @@ def update_dune_freshness_table():
         ,freshest_date
         ,current_timestamp() as updated_at
         from (
-            select * from existing_records
-            union all
+            -- select * from existing_records
+            -- union all
             select * from new_records
+        )
+
+        -- do not update solana tokens with negative wallets per dune
+        -- source: https://dune.com/queries/4094516
+        -- dune github ticket: https://github.com/duneanalytics/spellbook/issues/6690
+        where token_address not in (
+            '69kdRLyP5DTRkpHraaSZAQbWmAwzF9guKjZfzMXzcbAs'
+            ,'HovGjrBGTfna4dvg6exkMxXuexB3tUfEZKcut8AWowXj'
+            ,'DcUoGUeNTLhhzyrcz49LE7z3MEFwca2N9uSw1xbVi1gm'
+            ,'7iT1GRYYhEop2nV1dyCwK2MGyLmPHq47WhPGSwiqcUg5'
+            ,'BSHanq7NmdY6j8u5YE9A3SUygj1bhavFqb73vadspkL3'
+            ,'7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr'
+            ,'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3'
+            ,'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL'
+            ,'GtDZKAqvMZMnti46ZewMiXCa4oXF4bZxwQPoKzXPFxZn'
+            ,'5LafQUrVco6o7KMz42eqVEJ9LW31StPyGjeeu5sKoMtA'
+            ,'52DfsNknorxogkjqecCTT3Vk2pUwZ3eMnsYKVm4z3yWy'
+            ,'SHDWyBxihqiCj6YekG2GUr7wqKLeLAMK1gHZck9pL6y'
+            ,'MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey'
+            ,'FU1q8vJpZNUrmqsciSjp8bAKKidGsLmouB8CBdf8TKQv'
+            ,'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE'
+            ,'5z3EqYQo9HiCEs3R84RCDMu2n7anpDMxRhdK8PSWmrRC'
+            ,'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm'
+            ,'25hAyBQfoDhfWx9ay6rarbgvWGwDdNqcHsXS3jQ3mTDJ'
+            ,'45EgCwcPXYagBC7KqBin4nCFgEZWN7f3Y6nACwxqMCWX'
         )
     '''
     freshness_df = dgc().run_sql(query_sql)
@@ -131,7 +172,7 @@ def generate_net_transfers_update_query(dune_chains):
         dune_chains <set>: a set of all blockchains that need freshness updates
 
     returns:
-        full_query <str>: the long dune query that will return all wallet-coin-days needed to update
+        full_query <str>: the long dune query that will generates the wallet-coin-day-transfers
     '''
 
     # query to retrieve solana transfers (solana tables have different structure than erc20 tables)
@@ -151,7 +192,7 @@ def generate_net_transfers_update_query(dune_chains):
                 where batch_recency = 1
             ),
 
-            -- filter the transfers table on indexed columns (block_date) to improve subsequent query performance
+            -- filter transfers on index (block_date) to improve query performance
             transfers_filtered as (
                 -- find the earliest possible date that we need data for
                 with most_out_of_date as (
@@ -236,7 +277,7 @@ def generate_net_transfers_update_query(dune_chains):
                 where batch_recency = 1
             ),
 
-            -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
+            -- filter transfers on index column 'block_time' to improve performance
             transfers_filtered as (
                 -- find the earliest possible date that we need data for
                 with most_out_of_date as (
@@ -330,7 +371,7 @@ def get_fresh_dune_data(full_query):
     params:
         full_query (str): sql query to run
     returns:
-        transfers_df (pandas.DataFrame): df of token transfers without decimal calculations applied
+        transfers_json (json): json of token transfers without decimal calculations applied
     '''
     dune = DuneClient.from_env()
 
@@ -353,11 +394,10 @@ def get_fresh_dune_data(full_query):
     logger.info('fetched fresh dune data with %s rows.', len(transfers_json_df))
 
     # expand the json data into df columns
-    json_data = [json.loads(record) for record in transfers_json_df['transfers_json']]
-    transfers_df = pd.DataFrame(json_data)
+    transfers_json = [json.loads(record) for record in transfers_json_df['transfers_json']]
     logger.info('completed translation from dune export json to dataframe.')
 
-    return transfers_df
+    return transfers_json
 
 
 def append_to_bigquery_table(freshness_df,transfers_df):
