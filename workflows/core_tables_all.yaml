@@ -16,7 +16,7 @@ main:
             timeout: 300
 
     - ingestNewCoins:
-        # ingest new coins from community calls, whale charts, etc
+        # ingest new coins from community calls, whale charts, etc into core.coins
         call: http.get
         args:
             url: https://core-coins-fatui3rd2a-uw.a.run.app
@@ -34,8 +34,8 @@ main:
             connector_params:
                 timeout: 1800
 
-    - retrieveCoingeckoMarketData:
-        # pull prices and other market data for all matched coins
+    - retrieveCoinMarketData:
+        # pull prices and other market data from coingecko/geckoterminal for all matched coins
         call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
         args:
             workflow_id: core-coin-market-data
@@ -43,7 +43,7 @@ main:
                 timeout: 3000
 
     - rebuildCoreCoins:
-        # rebuild core.coins to reflect coingecko data completeness
+        # rebuild core.coins to reflect updated metadata
         call: http.get
         args:
             url: https://core-coins-fatui3rd2a-uw.a.run.app

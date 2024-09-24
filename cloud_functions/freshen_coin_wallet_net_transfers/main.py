@@ -85,9 +85,14 @@ def update_dune_freshness_table():
             left join existing_records e on e.token_address = c.address
                 and e.chain = ch.chain_text_dune
 
-            where e.token_address is null -- only include coins without existing transfer data
-            and ch.chain_text_dune is not null -- only include dune-supported blockchains
-            and c.decimals is not null -- currently decimals are required to run the dune queries
+            -- new coins don't have existing transfer data
+            where e.token_address is null
+
+             -- new coins must have dune-supported blockchains
+            and ch.chain_text_dune is not null
+
+            -- new coins currently need decimal data to run the dune queries
+            and c.decimals is not null
 
             -- max market cap is used to prioritize smaller coins with lower credit cost
             order by cap_size.max_market_cap asc
@@ -103,9 +108,11 @@ def update_dune_freshness_table():
             -- union all
             select * from new_records
         )
+
+        -- do not update solana tokens with negative wallets per dune
+        -- source: https://dune.com/queries/4094516
+        -- dune github ticket: https://github.com/duneanalytics/spellbook/issues/6690
         where token_address not in (
-            -- solana tokens with negative wallets per dune
-            -- see https://dune.com/queries/4094516
             '69kdRLyP5DTRkpHraaSZAQbWmAwzF9guKjZfzMXzcbAs'
             ,'HovGjrBGTfna4dvg6exkMxXuexB3tUfEZKcut8AWowXj'
             ,'DcUoGUeNTLhhzyrcz49LE7z3MEFwca2N9uSw1xbVi1gm'
@@ -165,7 +172,7 @@ def generate_net_transfers_update_query(dune_chains):
         dune_chains <set>: a set of all blockchains that need freshness updates
 
     returns:
-        full_query <str>: the long dune query that will return all wallet-coin-days needed to update
+        full_query <str>: the long dune query that will generates the wallet-coin-day-transfers
     '''
 
     # query to retrieve solana transfers (solana tables have different structure than erc20 tables)
@@ -185,7 +192,7 @@ def generate_net_transfers_update_query(dune_chains):
                 where batch_recency = 1
             ),
 
-            -- filter the transfers table on indexed columns (block_date) to improve subsequent query performance
+            -- filter transfers on index (block_date) to improve query performance
             transfers_filtered as (
                 -- find the earliest possible date that we need data for
                 with most_out_of_date as (
@@ -270,7 +277,7 @@ def generate_net_transfers_update_query(dune_chains):
                 where batch_recency = 1
             ),
 
-            -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
+            -- filter transfers on index column 'block_time' to improve performance
             transfers_filtered as (
                 -- find the earliest possible date that we need data for
                 with most_out_of_date as (
