@@ -19,7 +19,6 @@ efficiently while respecting Coingecko's API rate limits and handling errors gra
 """
 import time
 import datetime
-import logging
 import os
 import json
 import requests
@@ -171,12 +170,12 @@ def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
         response_data = json.loads(response.text)
 
         if 'status' in response_data and response_data['status'].get('error_code') == 429:
-            logging.info("Rate limit exceeded, retrying in %d seconds... (Attempt %d of %d)",
+            logger.info("Rate limit exceeded, retrying in %d seconds... (Attempt %d of %d)",
                          retry_delay, attempt + 1, max_retries)
             time.sleep(retry_delay)
         else:
             return response_data
 
-    logging.error("Max retries reached. Returning the last response data.")
+    logger.error("Max retries reached. Returning the last response data.")
 
     return response_data
