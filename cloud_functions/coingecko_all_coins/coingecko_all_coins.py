@@ -21,59 +21,36 @@ logger = dc.setup_logger()
 @functions_framework.http
 def retrieve_coingecko_all_coins(request): # pylint: disable=unused-argument  # noqa: F841
     '''
-    Retrieves and uploads a page from the all coins endpoint for the given page range
-    '''
-
-    # retrieve the number of pages to upload and store the batch time
-    pages = request.args.get('all_coins_pages', default=1, type=int)
-    batch_datetime = f"{datetime.datetime.now().strftime('%Y_%m_%d__%H_%M_%S')}"
-
-    # ping api for each coin, adjusting the range so it starts at 1
-    for page in range(1, pages + 1):
-        logger.debug('Retrieving page %s of coingecko all coins list...', page)
-
-        # retrieve the metadata
-        coingecko_get_all_coins_page(page,batch_datetime)
-
-        # rate limit pause
-        logger.info('pausing 15 seconds to avoid coingecko api rate limit issues...')
-        time.sleep(15)
-
-    return "coingecko metadata update completed."
-
-
-
-def coingecko_get_all_coins_page(page,batch_datetime):
-    '''
-    Retrieves a page of 250 coins from the coingecko all coins endpoint
-
-    param: page <int> the page number of the all coins list to retrieve
-    param: batch_datetime <string> a string representation of when this batch of ids was retrieved
+    Retrieves all coins from the Coingecko API, stores the data in GCS, and uploads it to BigQuery.
     '''
     # get GCP credentials
     credentials = dgc().credentials
 
-    # making the api call
-    response_data = fetch_coingecko_data(page)
+    # retrieve list of all coins
+    response_data = fetch_coingecko_data()
 
-    # store the data in gcs if the response was correctly formed
+    # store the data if the response was correctly formed
     if 'id' in response_data[0]:
+
         # storing json in gcs
+        batch_datetime = f"{datetime.datetime.now().strftime('%Y_%m_%d__%H_%M_%S')}"
         filepath = 'data_lake/coingecko_all_coins/'
-        filename = f'all_coins_{batch_datetime}_page_{page}'
+        filename = f'all_coins_{batch_datetime}'
 
         client = storage.Client(credentials=credentials, project='dreams-labs-data')
         bucket = client.get_bucket('dreams-labs-storage')
 
         blob = bucket.blob(filepath + filename)
         blob.upload_from_string(json.dumps(response_data), content_type='json')
+        logger.info('%s uploaded successfully to GCS.', filename)
 
-        logger.debug('%s uploaded successfully', filename)
 
         # upload the data to bigquery
         upload_coingecko_data_to_bigquery(response_data, batch_datetime)
+        logger.info('%s uploaded successfully to BigQuery.', filename)
 
 
+    return "coingecko all coins update completed."
 
 
 def upload_coingecko_data_to_bigquery(json_data: List[Dict], batch_datetime) -> None:
@@ -82,10 +59,10 @@ def upload_coingecko_data_to_bigquery(json_data: List[Dict], batch_datetime) -> 
 
     Args:
         json_data (List[Dict]): List of dictionaries, each representing data for a single coin.
-        batch_datetime <string> a string representation of when this batch of ids was retrieved
+        batch_datetime (str): A string representation of when this batch of coins was retrieved.
 
     Returns:
-        None: Prints the status of the upload (success or error).
+        None: Logs the status of the upload (success or error).
     """
     # Initialize BigQuery client
     client = bigquery.Client()
@@ -99,18 +76,23 @@ def upload_coingecko_data_to_bigquery(json_data: List[Dict], batch_datetime) -> 
     # Prepare rows for BigQuery
     rows_to_insert = []
     for coin in json_data:
+
+        # extract blockchain-address pairs
+        contract_addresses = []
+        platforms = coin.get('platforms', {})
+
+        for blockchain, contract_address in platforms.items():
+            contract_addresses.append({
+                'blockchain': blockchain,
+                'contract_address': contract_address
+            })
+
+        # upload row
         row = {
             "id": coin["id"],
             "symbol": coin["symbol"],
             "name": coin["name"],
-            "current_price": coin.get("current_price"),
-            "market_cap": coin.get("market_cap"),
-            "market_cap_rank": coin.get("market_cap_rank"),
-            "fully_diluted_valuation": coin.get("fully_diluted_valuation"),
-            "total_volume": coin.get("total_volume"),
-            "ath_date": coin.get("ath_date").replace("Z", "") if coin.get("ath_date") else None,
-            "atl_date": coin.get("atl_date").replace("Z", "") if coin.get("atl_date") else None,
-            "last_updated_coingecko": coin.get("last_updated").replace("Z", "") if coin.get("last_updated") else None,  # pylint: disable=C0301
+            "contract_addresses": contract_addresses,
             "created_at": created_at
         }
         rows_to_insert.append(row)
@@ -125,20 +107,22 @@ def upload_coingecko_data_to_bigquery(json_data: List[Dict], batch_datetime) -> 
 
 
 
-def fetch_coingecko_data(page, max_retries=3, retry_delay=30):
+def fetch_coingecko_data(max_retries=3, retry_delay=30):
     '''
     Makes an API call to Coingecko and returns the response data.
     Retries the call if a rate limit error (429) is encountered.
 
-    param: page <int> the page number of the all coins list to retrieve
-    param: max_retries <int> number of times to retry on 429 error
-    param: retry_delay <int> delay in seconds between retries
+    Args:
+        max_retries (int): Number of times to retry on a 429 error. Default is 3.
+        retry_delay (int): Delay in seconds between retries. Default is 30.
 
-    returns: response_data <dict> JSON response data from Coingecko API
+    Returns:
+        response_data (dict): JSON response data from Coingecko API.
     '''
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
     headers = {'x_cg_pro_api_key': coingecko_api_key}
-    url = f'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&page={page}'
+    url = "https://api.coingecko.com/api/v3/coins/list?include_platform=true&status=active"
+
 
     for attempt in range(max_retries):
         response = requests.get(url, headers=headers, timeout=30)
