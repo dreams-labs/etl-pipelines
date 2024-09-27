@@ -19,20 +19,19 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
-def retrieve_coingecko_all_coins(request): # pylint: disable=unused-argument  # noqa: F841
+def retrieve_coingecko_all_coins(request):  # pylint: disable=unused-argument  # noqa: F841
     '''
     Retrieves all coins from the Coingecko API, stores the data in GCS, and uploads it to BigQuery.
     '''
-    # get GCP credentials
+    # Get GCP credentials
     credentials = dgc().credentials
 
-    # retrieve list of all coins
+    # Retrieve list of all coins
     response_data = fetch_coingecko_data()
 
-    # store the data if the response was correctly formed
+    # Store the data if the response was correctly formed
     if 'id' in response_data[0]:
-
-        # storing json in gcs
+        # Store JSON in GCS
         batch_datetime = f"{datetime.datetime.now().strftime('%Y_%m_%d__%H_%M_%S')}"
         filepath = 'data_lake/coingecko_all_coins/'
         filename = f'all_coins_{batch_datetime}'
@@ -41,19 +40,17 @@ def retrieve_coingecko_all_coins(request): # pylint: disable=unused-argument  # 
         bucket = client.get_bucket('dreams-labs-storage')
 
         blob = bucket.blob(filepath + filename)
-        blob.upload_from_string(json.dumps(response_data), content_type='json')
+        blob.upload_from_string(json.dumps(response_data), content_type='application/json')
         logger.info('%s uploaded successfully to GCS.', filename)
 
-
-        # upload the data to bigquery
+        # Upload the data to BigQuery
         upload_coingecko_data_to_bigquery(response_data, batch_datetime)
         logger.info('%s uploaded successfully to BigQuery.', filename)
 
+    return "Coingecko all coins update completed."
 
-    return "coingecko all coins update completed."
 
-
-def upload_coingecko_data_to_bigquery(json_data: List[Dict], batch_datetime) -> None:
+def upload_coingecko_data_to_bigquery(json_data: List[Dict], batch_datetime: str) -> None:
     """
     Extracts relevant fields from a list of coin data in JSON format and uploads them to BigQuery.
 
@@ -68,16 +65,14 @@ def upload_coingecko_data_to_bigquery(json_data: List[Dict], batch_datetime) -> 
     client = bigquery.Client()
     table_id = 'western-verve-411004.etl_pipelines.coingecko_all_coins'
 
-    # define the created_at var with the correct formatting
+    # Parse and format the created_at field
     parsed_date = datetime.datetime.strptime(batch_datetime, '%Y_%m_%d__%H_%M_%S')
     created_at = parsed_date.strftime('%Y-%m-%d %H:%M:%S')
-
 
     # Prepare rows for BigQuery
     rows_to_insert = []
     for coin in json_data:
-
-        # extract blockchain-address pairs
+        # Extract blockchain-contract address pairs
         contract_addresses = []
         platforms = coin.get('platforms', {})
 
@@ -87,7 +82,7 @@ def upload_coingecko_data_to_bigquery(json_data: List[Dict], batch_datetime) -> 
                 'contract_address': contract_address
             })
 
-        # upload row
+        # Build row to upload
         row = {
             "id": coin["id"],
             "symbol": coin["symbol"],
@@ -106,8 +101,7 @@ def upload_coingecko_data_to_bigquery(json_data: List[Dict], batch_datetime) -> 
         logger.warning("Encountered errors: %s", errors)
 
 
-
-def fetch_coingecko_data(max_retries=3, retry_delay=30):
+def fetch_coingecko_data(max_retries=3, retry_delay=30) -> Dict:
     '''
     Makes an API call to Coingecko and returns the response data.
     Retries the call if a rate limit error (429) is encountered.
@@ -123,18 +117,16 @@ def fetch_coingecko_data(max_retries=3, retry_delay=30):
     headers = {'x_cg_pro_api_key': coingecko_api_key}
     url = "https://api.coingecko.com/api/v3/coins/list?include_platform=true&status=active"
 
-
     for attempt in range(max_retries):
         response = requests.get(url, headers=headers, timeout=30)
         response_data = json.loads(response.text)
 
         if 'status' in response_data and response_data['status'].get('error_code') == 429:
             logger.info("Rate limit exceeded, retrying in %d seconds... (Attempt %d of %d)",
-                            retry_delay, attempt + 1, max_retries)
+                        retry_delay, attempt + 1, max_retries)
             time.sleep(retry_delay)
         else:
             return response_data
 
     logger.error("Max retries reached. Returning the last response data.")
-
     return response_data
