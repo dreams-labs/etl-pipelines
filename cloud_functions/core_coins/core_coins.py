@@ -85,6 +85,8 @@ def intake_new_community_calls_coins():
     '''
 
     query_sql = '''
+        insert into etl_pipelines.coins_intake (
+
         with all_calls as (
             select generate_uuid() as coin_id
             ,c.blockchain as chain_input
@@ -110,8 +112,10 @@ def intake_new_community_calls_coins():
             select ac.*
             ,row_number() over (partition by ac.chain_id,ac.address order by ac.source_date asc) as record_count
             ,case when c.coin_id is not null then 1 else 0 end as already_ingested
+            ,case when c.coin_id is not null then 1 else 0 end as already_in_queue
             from all_calls ac
-            left join etl_pipelines.coins_intake c on c.address = ac.address and c.chain_id = ac.chain_id
+            left join core.coins c on c.address = ac.address and c.chain_id = ac.chain_id
+            left join etl_pipelines.coins_intake ci on ci.address = ac.address and ci.chain_id = ac.chain_id
         )
 
         select coin_id
@@ -129,11 +133,16 @@ def intake_new_community_calls_coins():
         -- don't add duplicates within the source table
         where record_count = 1
 
-        -- don't add calls that share a normalized chain+address with existing coins
+        -- don't add calls that share a normalized chain+address with existing core.coins
         and already_ingested = 0
+
+        -- don't add calls that share a normalized chain+address with coins in the intake_queue
+        and already_in_queue = 0
 
         -- don't add calls with invalid chain values
         and has_valid_chain = True
+
+        )
         '''
 
     dgc().run_sql(query_sql)
