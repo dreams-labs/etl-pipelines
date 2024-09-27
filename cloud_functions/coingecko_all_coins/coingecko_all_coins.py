@@ -130,3 +130,4 @@ def fetch_coingecko_data(max_retries=3, retry_delay=30) -> Dict:
 
     logger.error("Max retries reached. Returning the last response data.")
     return response_data
+    
