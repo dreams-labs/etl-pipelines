@@ -44,6 +44,10 @@ def retrieve_coingecko_all_coins_market_summary(request): # pylint: disable=unus
         # making the api call
         response_data = fetch_coingecko_data(page)
 
+        if not response_data:
+            logger.info('No records found after page %s, terminating retrieval process.', page-1)
+            break
+
         # store the data in gcs if the response was correctly formed
         if 'id' in response_data[0]:
             # set filename
@@ -60,9 +64,6 @@ def retrieve_coingecko_all_coins_market_summary(request): # pylint: disable=unus
 
 
         # if an empty array is returned, that means we don't have any more pages with data
-        elif not response_data:
-            logger.info('No records found after page %s, terminating retrieval process.', page-1)
-            break
 
         # rate limit pause
         logger.debug('pausing 15 seconds to avoid coingecko api rate limit issues...')
