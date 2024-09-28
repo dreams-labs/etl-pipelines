@@ -54,7 +54,10 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
         from core.coins cc
         join core.chains ch on ch.chain_id = cc.chain_id
         left join etl_pipelines.coin_coingecko_ids cgi on cgi.coin_id = cc.coin_id
-            and cgi.search_log = "{'error': 'coin not found'}"
+            and cgi.search_log in (
+                'search successful'
+                ,"{'error': 'coin not found'}"
+            )
         left join etl_pipelines.coin_coingecko_metadata cgm on cgm.coingecko_id = cc.coingecko_id
         -- don't include coins without addresses
         where cc.address is not null
@@ -86,8 +89,8 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
             )
 
         # rate limit pause
-        logger.info('pausing 2 seconds to avoid coingecko api rate limit issues...')
-        time.sleep(2)
+        logger.info('pausing 15 seconds to avoid coingecko api rate limit issues...')
+        time.sleep(15)
 
     return "coingecko metadata update completed."
 
@@ -168,7 +171,7 @@ def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
     returns: response_data <dict> JSON response data from Coingecko API
     '''
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
-    headers = {'x_cg_demo_api_key': coingecko_api_key}
+    headers = {'x_cg_pro_api_key': coingecko_api_key}
     url = f'https://api.coingecko.com/api/v3/coins/{blockchain}/contract/{address}'
 
     for attempt in range(max_retries):

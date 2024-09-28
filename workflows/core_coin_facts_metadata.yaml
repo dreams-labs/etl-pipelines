@@ -17,13 +17,12 @@ main:
 
                 # Retrieve metadata from API and store in Cloud Storage
                 - coingeckoRetrieveMetadata:
-                    try:
-                        call: http.get
-                        args:
-                            url: https://coingecko-coin-metadata-fatui3rd2a-uw.a.run.app
-                            auth:
-                                type: OIDC
-                            timeout: 1800
+                    call: http.get
+                    args:
+                        url: https://coingecko-coin-metadata-fatui3rd2a-uw.a.run.app
+                        auth:
+                            type: OIDC
+                        timeout: 1800
 
                 # Parse responses from Cloud Storage and load to BigQuery
                 - coingeckoParseJson:
@@ -47,13 +46,12 @@ main:
 
                 # Retrieve metadata from API and store in Cloud Storage
                 - geckoterminalRetrieveMetadata:
-                    try:
-                        call: http.get
-                        args:
-                            url: https://geckoterminal-coin-metadata-954736581165.us-west1.run.app
-                            auth:
-                                type: OIDC
-                            timeout: 1800
+                    call: http.get
+                    args:
+                        url: https://geckoterminal-coin-metadata-954736581165.us-west1.run.app
+                        auth:
+                            type: OIDC
+                        timeout: 1800
 
                 # Parse responses from Cloud Storage and load to BigQuery
                 - geckoterminalParseJson:
