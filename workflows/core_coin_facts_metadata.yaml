@@ -24,12 +24,6 @@ main:
                             auth:
                                 type: OIDC
                             timeout: 1800
-                    retry:
-                        max_retries: 3
-                        backoff:
-                            initial_delay: 30
-                            max_delay: 120
-                            multiplier: 2
 
                 # Parse responses from Cloud Storage and load to BigQuery
                 - coingeckoParseJson:
@@ -60,12 +54,6 @@ main:
                             auth:
                                 type: OIDC
                             timeout: 1800
-                    retry:
-                        max_retries: 3
-                        backoff:
-                            initial_delay: 30
-                            max_delay: 120
-                            multiplier: 2
 
                 # Parse responses from Cloud Storage and load to BigQuery
                 - geckoterminalParseJson:

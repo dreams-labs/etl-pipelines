@@ -86,8 +86,8 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
             )
 
         # rate limit pause
-        logger.info('pausing 15 seconds to avoid coingecko api rate limit issues...')
-        time.sleep(15)
+        logger.info('pausing 2 seconds to avoid coingecko api rate limit issues...')
+        time.sleep(2)
 
     return "coingecko metadata update completed."
 
