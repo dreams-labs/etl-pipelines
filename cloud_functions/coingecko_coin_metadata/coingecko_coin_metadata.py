@@ -19,7 +19,6 @@ efficiently while respecting Coingecko's API rate limits and handling errors gra
 """
 import time
 import datetime
-import logging
 import os
 import json
 import requests
@@ -40,6 +39,12 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
     Queries BigQuery to obtain a list of coins that need metadata and attempts to match them and
     store metadata by calling coingecko_metadata_search() for each.
     '''
+
+    # get GCP credentials
+    credentials = dgc().credentials
+    bigquery_client = bigquery.Client(credentials=credentials, project='dreams-labs-data')
+    storage_client = storage.Client(credentials=credentials, project='dreams-labs-data')
+
 
     # pull list of coins to attempt
     query_sql = '''
@@ -76,6 +81,8 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
                 blockchain
                 ,address
                 ,coin_id
+                ,bigquery_client
+                ,storage_client
             )
 
         # rate limit pause
@@ -86,7 +93,7 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
 
 
 
-def coingecko_metadata_search(blockchain, address, coin_id):
+def coingecko_metadata_search(blockchain, address, coin_id, bigquery_client, storage_client):
     '''
     For a given blockchain and address, attempts to look up the coin on Coingecko by calling
     fetch_coingecko_data(). If the search is successful, stores the metadata in GCS.
@@ -94,9 +101,9 @@ def coingecko_metadata_search(blockchain, address, coin_id):
     param: blockchain <string> this must match chain_text_coingecko from core.chains
     param: address <string> token contract address
     param: coin_id <dataframe> core.coins.coin_id which is added to bigquery records
+    param: bigquery_client <dataframe> authenticated client for inserting rows to BigQuery
+    param: storage_client <dataframe> authenticated client for uploading to GCS
     '''
-    # get GCP credentials
-    credentials = dgc().credentials
 
     # making the api call
     response_data = fetch_coingecko_data(blockchain, address)
@@ -123,8 +130,7 @@ def coingecko_metadata_search(blockchain, address, coin_id):
         filepath = 'data_lake/coingecko_coin_metadata/'
         filename = str(response_data['id'] + '.json')
 
-        client = storage.Client(credentials=credentials, project='dreams-labs-data')
-        bucket = client.get_bucket('dreams-labs-storage')
+        bucket = storage_client.get_bucket('dreams-labs-storage')
 
         blob = bucket.blob(filepath + filename)
         blob.upload_from_string(json.dumps(response_data), content_type='json')
@@ -132,7 +138,6 @@ def coingecko_metadata_search(blockchain, address, coin_id):
         logger.info('%s uploaded successfully', filename)
 
     # store search result in etl_pipelines.coin_coingecko_ids
-    client = bigquery.Client(credentials=credentials, project='dreams-labs-data')
     table_id = 'western-verve-411004.etl_pipelines.coin_coingecko_ids'
 
     rows_to_insert = [{
@@ -143,7 +148,7 @@ def coingecko_metadata_search(blockchain, address, coin_id):
         'search_log': search_log
     }]
 
-    errors = client.insert_rows_json(table_id, rows_to_insert)  # Make an API request.
+    errors = bigquery_client.insert_rows_json(table_id, rows_to_insert)  # Make an API request.
     if not errors:
         logger.info("new row added to etl_pipelines.coin_coingecko_ids")
     else:
@@ -171,12 +176,12 @@ def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
         response_data = json.loads(response.text)
 
         if 'status' in response_data and response_data['status'].get('error_code') == 429:
-            logging.info("Rate limit exceeded, retrying in %d seconds... (Attempt %d of %d)",
+            logger.info("Rate limit exceeded, retrying in %d seconds... (Attempt %d of %d)",
                          retry_delay, attempt + 1, max_retries)
             time.sleep(retry_delay)
         else:
             return response_data
 
-    logging.error("Max retries reached. Returning the last response data.")
+    logger.error("Max retries reached. Returning the last response data.")
 
     return response_data

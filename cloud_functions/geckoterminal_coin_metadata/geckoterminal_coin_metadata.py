@@ -152,7 +152,6 @@ def geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, 
         def upload_to_gcs(data, filename, path):
             blob = bucket.blob(path + filename)
             blob.upload_from_string(json.dumps(data), content_type='application/json')
-            logger.info('%s uploaded successfully', filename)
 
         # Upload both main and info data
         upload_to_gcs(response_data, filename_main, paths['main'])

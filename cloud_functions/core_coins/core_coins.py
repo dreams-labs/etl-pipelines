@@ -17,7 +17,7 @@ def update_core_coins(request):
     updates to new data connections, such as new coingecko_ids, market data, etc.
     '''
     # Get query parameter to control whether to intake new coins or to just rebuild core.coins
-    intake_new_coins = request.args.get('intake_new_coins', 'true').lower()
+    intake_new_coins = request.args.get('intake_new_coins', 'false')
 
     # intake new coins if instructed to do so
     if intake_new_coins == 'true':
@@ -32,6 +32,8 @@ def update_core_coins(request):
         # add new coins with wallet transfer data from the whale chart function
         intake_new_wallet_transfer_coins()
 
+        # add new coins from the coingecko_all_coins etl tables
+        intake_new_coingecko_all_coins()
 
     # refresh core.coins, logging the number of coins before and after the refresh
     logger.info("rebuilding core.coins table...")
@@ -85,6 +87,8 @@ def intake_new_community_calls_coins():
     '''
 
     query_sql = '''
+        insert into etl_pipelines.coins_intake (
+
         with all_calls as (
             select generate_uuid() as coin_id
             ,c.blockchain as chain_input
@@ -110,8 +114,10 @@ def intake_new_community_calls_coins():
             select ac.*
             ,row_number() over (partition by ac.chain_id,ac.address order by ac.source_date asc) as record_count
             ,case when c.coin_id is not null then 1 else 0 end as already_ingested
+            ,case when c.coin_id is not null then 1 else 0 end as already_in_queue
             from all_calls ac
-            left join etl_pipelines.coins_intake c on c.address = ac.address and c.chain_id = ac.chain_id
+            left join core.coins c on c.address = ac.address and c.chain_id = ac.chain_id
+            left join etl_pipelines.coins_intake ci on ci.address = ac.address and ci.chain_id = ac.chain_id
         )
 
         select coin_id
@@ -129,11 +135,16 @@ def intake_new_community_calls_coins():
         -- don't add duplicates within the source table
         where record_count = 1
 
-        -- don't add calls that share a normalized chain+address with existing coins
+        -- don't add calls that share a normalized chain+address with existing core.coins
         and already_ingested = 0
+
+        -- don't add calls that share a normalized chain+address with coins in the intake_queue
+        and already_in_queue = 0
 
         -- don't add calls with invalid chain values
         and has_valid_chain = True
+
+        )
         '''
 
     dgc().run_sql(query_sql)
@@ -218,6 +229,88 @@ def intake_new_wallet_transfer_coins():
         '''
 
     dgc().run_sql(query_sql)
+
+
+
+def intake_new_coingecko_all_coins():
+    '''
+    ingests new coins from the etl_pipelines.coingecko_all_coins_intake_queue table into
+    the etl_pipelines.coins_intake table through the following steps:
+        1. normalizes coin addresses and chains
+        2. checks for duplicates and coins that have already been ingested
+        3. inserts the remaining coins
+    '''
+
+    query_sql = '''
+        insert into etl_pipelines.coins_intake (
+
+        -- format intake tablefields for insert statement
+        with all_additions as (
+            select generate_uuid() as coin_id
+            ,c.blockchain as chain_input
+            ,c.address as address_input
+            ,'coingecko_all_coins' as source
+            ,c.source_date
+            ,case when ch.chain_id is not null then TRUE else FALSE end as has_valid_chain
+            ,ch.chain
+            ,ch.chain_id
+            ,case
+                when ch.is_case_sensitive = FALSE then lower(c.address)
+                else c.address
+                end as address
+            ,current_datetime() as created_at
+            from etl_pipelines.coingecko_all_coins_intake_queue c
+            left join `reference.chain_nicknames` chn on lower(chn.chain_reference) = lower(c.blockchain)
+            left join core.chains ch on ch.chain_id = chn.chain_id
+        )
+
+
+        -- data checks on the contents
+        ,data_checks as (
+            select ac.*
+            ,row_number() over (partition by ac.coin_id order by ac.source_date desc) as rn
+            ,case when c.coin_id is not null then 1 else 0 end as address_matched
+            ,case when ci.coin_id is not null then 1 else 0 end as already_ingested
+            from all_additions ac
+            left join core.coins c on c.address = ac.address and c.chain_id = ac.chain_id
+            left join etl_pipelines.coins_intake ci on ci.address = ac.address and ci.chain_id = ac.chain_id
+
+        )
+
+        select coin_id
+        ,chain_input
+        ,address_input
+        ,source
+        ,source_date
+        ,has_valid_chain
+        ,chain
+        ,chain_id
+        ,address
+        ,created_at
+        from data_checks dc
+
+        -- only include coins with addresses
+        where dc.address is not null
+
+        -- don't add duplicates within the source table
+        and rn = 1
+
+        -- don't add calls that share a normalized chain+address with core.coins records
+        and address_matched = 0
+
+        -- don't add calls that share a normalized chain+address with intake queue records
+        and already_ingested = 0
+
+        -- don't add calls with invalid chain values
+        and has_valid_chain = True
+
+        )
+
+        '''
+
+    dgc().run_sql(query_sql)
+
+
 
 
 

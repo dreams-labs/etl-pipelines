@@ -96,7 +96,7 @@ def update_dune_freshness_table():
 
             -- max market cap is used to prioritize smaller coins with lower credit cost
             order by cap_size.max_market_cap asc
-            limit 40
+            limit 15
         )
         select chain
         ,token_address
