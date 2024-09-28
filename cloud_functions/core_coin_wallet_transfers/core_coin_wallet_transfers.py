@@ -2,13 +2,9 @@
 cloud function that runs a query to refresh the data in bigquery table core.coin_wallet_transfers
 '''
 import datetime
-import time
-import logging
-import os
 from pytz import utc
 import pandas as pd
 import functions_framework
-from google.cloud import bigquery_storage
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
@@ -17,7 +13,7 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
-def update_core_coin_wallet_transfers(request):
+def update_core_coin_wallet_transfers(request):  # pylint: disable=W0613
     '''
     runs all functions in sequence to refresh core.coin_market_data
     '''
@@ -30,8 +26,14 @@ def update_core_coin_wallet_transfers(request):
 
     # log job summary
     core_count = counts_df[counts_df['table']=='core.coin_wallet_transfers']['records'].iloc[0]
-    etl_count = counts_df[counts_df['table']=='etl_pipelines.coin_wallet_net_transfers']['records'].iloc[0]
-    logger.info('rebuilt core.coin_wallet_transfers [%s rows] from etl_pipelines.coin_wallet_net_transfers [%s rows].',core_count,etl_count)
+    etl_count = counts_df[
+        counts_df['table']=='etl_pipelines.coin_wallet_net_transfers'
+        ]['records'].iloc[0]
+    logger.info(
+        'rebuilt core.coin_wallet_transfers [%s rows] from '
+        'etl_pipelines.coin_wallet_net_transfers [%s rows].',
+        core_count, etl_count
+    )
 
     return '{{"rebuild of core.coin_wallet_transfers complete."}}'
 
@@ -48,7 +50,9 @@ def update_exclusions_table():
     https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135
     '''
     # load the tab into a df
-    df = dgc().read_google_sheet('11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs','core_coin_wallet_transfers_exclusions!A:E')
+    df = dgc().read_google_sheet(
+        '11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs',
+        'core_coin_wallet_transfers_exclusions!A:E')
 
     # format and upload df
     df['created_date'] = pd.to_datetime(df['created_date'])
