@@ -39,10 +39,10 @@ def update_core_coin_wallet_transfers(request):
 
 def update_exclusions_table():
     '''
-    this is a list of excluded wallet addresses and includes uniswap, burn/mint addresses, 
+    this is a list of excluded wallet addresses and includes uniswap, burn/mint addresses,
     bridges, etc that result in negative balances and transaction bloat. this function
-    refreshes the etl_pipelines.core_coin_wallet_transfers_exclusions bigquery table by ingesting 
-    the underlying sheets data, formatting it, and uploading it to bigquery. 
+    refreshes the etl_pipelines.core_coin_wallet_transfers_exclusions bigquery table by ingesting
+    the underlying sheets data, formatting it, and uploading it to bigquery.
 
     exclusions are maintained in the 'core_coin_wallet_transfers_exclusions' tab of this sheet:
     https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135
@@ -64,7 +64,7 @@ def update_exclusions_table():
 
 def rebuild_core_coin_wallet_transfers():
     '''
-    adds new records in etl_pipelines.coin_market_data_coingecko to core.coin_market_data after 
+    adds new records in etl_pipelines.coin_market_data_coingecko to core.coin_market_data after
     normalizing and filling relevant fields
 
     returns:
@@ -79,7 +79,7 @@ def rebuild_core_coin_wallet_transfers():
             with exclusion_addresses as (
                 -- manual exclusions from https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=1863435581#gid=1863435581
                 select e.chain_text_source
-                ,case 
+                ,case
                     when ch.is_case_sensitive=False then lower(e.wallet_address)
                     else e.wallet_address
                     end as wallet_address
@@ -93,18 +93,18 @@ def rebuild_core_coin_wallet_transfers():
 
                 -- cex addresses from dune query https://dune.com/queries/4057433
                 select e.blockchain as chain_text_source
-                ,case 
+                ,case
                     when ch.is_case_sensitive=False then lower(e.wallet_address)
                     else e.wallet_address
                     end as wallet_address
                 from `reference.addresses_cexes` e
                 join `core.chains` ch on ch.chain_text_dune = e.blockchain
 
-                union all 
+                union all
 
                 -- contract addresses from dune query https://dune.com/queries/4057525
                 select e.blockchain as chain_text_source
-                ,case 
+                ,case
                     when ch.is_case_sensitive=False then lower(e.address)
                     else e.address
                     end as address
@@ -120,30 +120,34 @@ def rebuild_core_coin_wallet_transfers():
                 ,wnt.wallet_address
                 ,wnt.date
                 ,cast(wnt.daily_net_transfers as bigdecimal) as net_transfers
-                ,sum(cast(daily_net_transfers as bigdecimal)) 
+                ,sum(cast(daily_net_transfers as bigdecimal))
                     over (partition by wnt.token_address,wnt.wallet_address,ch.chain_id order by wnt.date asc) as balance
-                ,count(daily_net_transfers) 
+                ,count(daily_net_transfers)
                     over (partition by wnt.token_address,wnt.wallet_address,ch.chain_id order by wnt.date asc) as transfer_sequence
                 from core.coins c
                 join core.chains ch on ch.chain_id = c.chain_id
-                join etl_pipelines.coin_wallet_net_transfers wnt on wnt.token_address = c.address 
+                join etl_pipelines.coin_wallet_net_transfers wnt on wnt.token_address = c.address
                     and (wnt.chain_text_source = ch.chain_text_dune and wnt.data_source = 'dune')
                 left join exclusion_addresses exclusions on exclusions.wallet_address = wnt.wallet_address
                     and exclusions.chain_text_source = wnt.chain_text_source
+                left join etl_pipelines.ethereum_transfers_exclusions coin_exclusions on coin_exclusions.coin_id = c.coin_id
 
                 -- remove dune's various representations of burn/mint addresses
                 where wnt.wallet_address <> 'None' -- removes burn/mint address for solana
                 and wnt.wallet_address <> '0x0000000000000000000000000000000000000000' -- removes burn/mint addresses
-                and wnt.wallet_address <> wnt.token_address 
+                and wnt.wallet_address <> wnt.token_address
                 and wnt.wallet_address <> '<nil>'
 
                 -- remove the manually excluded addresses
                 and exclusions.wallet_address is null
+
+                -- remove stablecoins, staked tokens, very large caps, etc
+                and coin_exclusions.coin_id is null
             ),
 
             negative_wallets_check as (
-                -- identify how many negative balance wallets are associated with each coin. 
-                -- balances below -0.1 tokens are classified as negative to ignore rounding errors. 
+                -- identify how many negative balance wallets are associated with each coin.
+                -- balances below -0.1 tokens are classified as negative to ignore rounding errors.
                 select coin_id
                 ,count(wallet_address) as wallets
                 ,count(case when lowest_balance < -0.1 then wallet_address end) as negative_wallets
@@ -169,7 +173,7 @@ def rebuild_core_coin_wallet_transfers():
         ,count(*) as records
         from core.coin_wallet_transfers
 
-        union all 
+        union all
 
         select 'etl_pipelines.coin_wallet_net_transfers'
         ,count(*)
