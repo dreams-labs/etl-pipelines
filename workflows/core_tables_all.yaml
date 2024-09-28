@@ -32,7 +32,7 @@ main:
         args:
             workflow_id: core-coin-facts-metadata
             connector_params:
-                timeout: 1800
+                timeout: 3600
 
     - retrieveCoinMarketData:
         # pull prices and other market data from coingecko/geckoterminal for all matched coins
@@ -40,7 +40,7 @@ main:
         args:
             workflow_id: core-coin-market-data
             connector_params:
-                timeout: 3000
+                timeout: 3600
 
     - rebuildCoreCoins:
         # rebuild core.coins to reflect updated metadata
