@@ -168,7 +168,7 @@ def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
     returns: response_data <dict> JSON response data from Coingecko API
     '''
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
-    headers = {'x_cg_pro_api_key': coingecko_api_key}
+    headers = {'x_cg_demo_api_key': coingecko_api_key}
     url = f'https://api.coingecko.com/api/v3/coins/{blockchain}/contract/{address}'
 
     for attempt in range(max_retries):
