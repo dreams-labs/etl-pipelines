@@ -104,34 +104,25 @@ def update_dune_freshness_table():
         ,freshest_date
         ,current_timestamp() as updated_at
         from (
-            -- select * from existing_records
+            select * from existing_records
             -- union all
-            select * from new_records
+            -- select * from new_records
         )
 
         -- do not update solana tokens with negative wallets per dune
         -- source: https://dune.com/queries/4094516
         -- dune github ticket: https://github.com/duneanalytics/spellbook/issues/6690
         where token_address not in (
-            '69kdRLyP5DTRkpHraaSZAQbWmAwzF9guKjZfzMXzcbAs'
-            ,'HovGjrBGTfna4dvg6exkMxXuexB3tUfEZKcut8AWowXj'
-            ,'DcUoGUeNTLhhzyrcz49LE7z3MEFwca2N9uSw1xbVi1gm'
-            ,'7iT1GRYYhEop2nV1dyCwK2MGyLmPHq47WhPGSwiqcUg5'
-            ,'BSHanq7NmdY6j8u5YE9A3SUygj1bhavFqb73vadspkL3'
-            ,'7GCihgDB8fe6KNjn2MYtkzZcRjQy3t9GHdC8uHYmW2hr'
-            ,'HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3'
-            ,'jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL'
-            ,'GtDZKAqvMZMnti46ZewMiXCa4oXF4bZxwQPoKzXPFxZn'
-            ,'5LafQUrVco6o7KMz42eqVEJ9LW31StPyGjeeu5sKoMtA'
-            ,'52DfsNknorxogkjqecCTT3Vk2pUwZ3eMnsYKVm4z3yWy'
-            ,'SHDWyBxihqiCj6YekG2GUr7wqKLeLAMK1gHZck9pL6y'
-            ,'MNDEFzGvMt87ueuHvVU9VcTqsAP5b3fTGPsHuuPA5ey'
-            ,'FU1q8vJpZNUrmqsciSjp8bAKKidGsLmouB8CBdf8TKQv'
-            ,'orcaEKTdK7LKz57vaAYr9QeNsVEPfiu6QeMU1kektZE'
-            ,'5z3EqYQo9HiCEs3R84RCDMu2n7anpDMxRhdK8PSWmrRC'
-            ,'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm'
+            'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm'
             ,'25hAyBQfoDhfWx9ay6rarbgvWGwDdNqcHsXS3jQ3mTDJ'
-            ,'45EgCwcPXYagBC7KqBin4nCFgEZWN7f3Y6nACwxqMCWX'
+            ,'FU1q8vJpZNUrmqsciSjp8bAKKidGsLmouB8CBdf8TKQv'
+            ,'5z3EqYQo9HiCEs3R84RCDMu2n7anpDMxRhdK8PSWmrRC'
+            ,'69kdRLyP5DTRkpHraaSZAQbWmAwzF9guKjZfzMXzcbAs'
+            ,'GtDZKAqvMZMnti46ZewMiXCa4oXF4bZxwQPoKzXPFxZn'
+            ,'52DfsNknorxogkjqecCTT3Vk2pUwZ3eMnsYKVm4z3yWy'
+            ,'BSHanq7NmdY6j8u5YE9A3SUygj1bhavFqb73vadspkL3'
+            ,'DcUoGUeNTLhhzyrcz49LE7z3MEFwca2N9uSw1xbVi1gm'
+            ,'5LafQUrVco6o7KMz42eqVEJ9LW31StPyGjeeu5sKoMtA'
         )
     '''
     freshness_df = dgc().run_sql(query_sql)

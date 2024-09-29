@@ -323,6 +323,28 @@ def refresh_core_coins():
         truncate table core.coins;
 
         insert into core.coins (
+            with all_coins_with_transfers as (
+                -- core.coin_wallet_transfers
+                select coin_id
+                from core.coin_wallet_transfers
+
+                union distinct
+
+                -- etl_pipelines.coin_wallet_net_transfers (dune)
+                select c.coin_id
+                from core.coins c
+                join core.chains ch on ch.chain_id = c.chain_id
+                join etl_pipelines.coin_wallet_net_transfers wnt on wnt.token_address = c.address
+                    and (wnt.chain_text_source = ch.chain_text_dune and wnt.data_source = 'dune')
+
+                union distinct
+
+                -- ethereum_net_transfers
+                select c.coin_id
+                from `etl_pipelines.ethereum_net_transfers` t
+                join core.coins c on c.address = t.token_address and c.chain = 'Ethereum'
+            )
+
             select ci.coin_id
             ,ci.chain
             ,ci.chain_id
@@ -345,11 +367,7 @@ def refresh_core_coins():
                 from core.coin_market_data
                 group by 1
             ) cmd on cmd.coin_id = ci.coin_id
-            left join (
-                select coin_id
-                from core.coin_wallet_transfers
-                group by 1
-            ) cwt on cwt.coin_id = ci.coin_id
+            left join all_coins_with_transfers cwt on cwt.coin_id = ci.coin_id
             where has_valid_chain = True
         )
         '''

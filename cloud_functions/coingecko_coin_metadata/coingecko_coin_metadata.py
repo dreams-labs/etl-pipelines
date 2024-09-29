@@ -54,7 +54,10 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
         from core.coins cc
         join core.chains ch on ch.chain_id = cc.chain_id
         left join etl_pipelines.coin_coingecko_ids cgi on cgi.coin_id = cc.coin_id
-            and cgi.search_log = "{'error': 'coin not found'}"
+            and cgi.search_log in (
+                'search successful'
+                ,"{'error': 'coin not found'}"
+            )
         left join etl_pipelines.coin_coingecko_metadata cgm on cgm.coingecko_id = cc.coingecko_id
         -- don't include coins without addresses
         where cc.address is not null

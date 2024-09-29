@@ -180,3 +180,27 @@ models:
             - chain_text_source
             - token_address
             - wallet_address
+
+  - name: ethereum_net_transfers
+    description: "daily transfer data from the public ethereum_transfers table"
+    meta:
+      schema: etl_pipelines
+    columns:
+      - name: date
+        description: "transfer date"
+        data_tests:
+          - not_null
+      - name: token_address
+        description: "token address"
+        data_tests:
+          - not_null
+      - name: wallet_address
+        description: "wallet address"
+        data_tests:
+          - not_null
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - date
+            - token_address
+            - wallet_address

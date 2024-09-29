@@ -107,7 +107,8 @@ def retrieve_updates_df():
         with coingecko_data_status as (
             select cgi.coingecko_id
             ,max(md.updated_at) as most_recent_record
-            from `etl_pipelines.coin_coingecko_ids` cgi
+            ,count(md.updated_at)
+            from `core.coin_facts_coingecko` cgi
             left join `etl_pipelines.coin_market_data_coingecko` md on md.coingecko_id = cgi.coingecko_id
 
             -- filter to remove ids that result in 404 responses
@@ -121,7 +122,7 @@ def retrieve_updates_df():
         ,cds.most_recent_record
         ,array_agg(cmd.date IGNORE NULLS order by cmd.date asc) as all_dates
         from coingecko_data_status cds
-        join `etl_pipelines.coin_market_data_coingecko` cmd on cmd.coingecko_id = cds.coingecko_id
+        left join `etl_pipelines.coin_market_data_coingecko` cmd on cmd.coingecko_id = cds.coingecko_id
         where (
             cds.most_recent_record is null
             or cds.most_recent_record < (current_date('UTC') - 2)
