@@ -10,10 +10,13 @@ insert into etl_pipelines.ethereum_transfers_cohorts (
     ,c.chain
     ,c.address
     ,current_datetime("UTC") as created_at
+    ,c.decimals
     from core.coins c
     left join etl_pipelines.ethereum_transfers_exclusions excl on excl.coin_id = c.coin_id
     where chain = 'Ethereum'
     and has_wallet_transfer_data = False
     and excl.coin_id is null
+    and c.decimals is not null
+    and c.decimals > 0
 
 )
