@@ -82,19 +82,17 @@ def retrieve_transfers_data():
     # Run the SQL query using dgc's run_sql method
     transfers_df = dgc().run_sql(query_sql)
 
+    logger.info('Converting columns to memory-efficient data types...')
+
     # Convert coin_id to categorical (original strings are preserved)
     transfers_df['coin_id'] = transfers_df['coin_id'].astype('category')
 
     # Dates as dates
     transfers_df['date'] = pd.to_datetime(transfers_df['date'])
 
-    # Convert wallet_address to categorical once and store it in a variable
+    # Convert wallet_address to categorical, store the mapping, and convert the column to int32
     wallet_address_categorical = transfers_df['wallet_address'].astype('category')
-
-    # Store the original mapping (categories)
     wallet_address_mapping = wallet_address_categorical.cat.categories
-
-    # Convert wallet_address to categorical codes using the same mapping
     transfers_df['wallet_address'] = wallet_address_categorical.cat.codes.astype('uint32')
 
     logger.info('Retrieved market_data_df with %s rows after %.2f seconds',
@@ -264,12 +262,26 @@ def prepare_profits_data(transfers_df, prices_df):
     step_time = time.time()
 
 
-    # 4. Remove the rows prior to pricing data append the new records
-    # ---------------------------------------------------------------
+    # 4. Set a transfer in of the balance as of the first price date as the first record
+    # ----------------------------------------------------------------------------------
     # Remove original records with no price data (NaN in 'price' column)
     profits_df = profits_df[profits_df['price'].notna()]
 
-    # Append new records to the original dataframe
+    # Remove the records in profits_df that will become the initial transfer in
+    if not new_records.empty:
+        # Merge profits_df with new_records, using an indicator
+        merged = pd.merge(profits_df, new_records[['coin_id', 'wallet_address', 'date']],
+                        on=['coin_id', 'wallet_address', 'date'],
+                        how='left',
+                        indicator=True)
+
+        # Keep only the rows that are in profits_df but not in new_records
+        profits_df = merged[merged['_merge'] == 'left_only'].drop(columns=['_merge'])
+
+        # Reset the index if needed
+        profits_df = profits_df.reset_index(drop=True)
+
+    # Append the initial transfer in records to the original dataframe
     if not new_records.empty:
         profits_df = pd.concat([profits_df, new_records], ignore_index=True)
         profits_df['coin_id'] = profits_df['coin_id'].astype('category')
