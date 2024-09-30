@@ -1,10 +1,11 @@
-'''
+"""
 cloud function that runs a query to refresh the data in bigquery table core.coin_market_data
-'''
+"""
 import time
 import pandas as pd
 import numpy as np
 import functions_framework
+import pandas_gbq
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
@@ -12,55 +13,36 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 
-
 @functions_framework.http
 def update_coin_market_data(request): # pylint: disable=unused-argument  # noqa: F841
-    '''
+    """
     runs all functions in sequence to refresh core.coin_market_data
-    '''
+    """
+    logger.info("Beginning refresh of core.coin_market_data...")
 
-    # retrieve initial record count
-    initial_records = get_coin_market_data_record_count()
-    logger.info('initial core.coin_market_data records: %s', initial_records)
+    # retrieve the unadjusted data from the coingecko and geckoterminal etl_pipelines tables
+    market_data_df = retrieve_raw_market_data()
 
-    # Insert new coingecko market data records to core.coin_market_data
-    retrieve_raw_market_data()
+    # fill empty records, leaving a 'days_imputed' column to make data lineage clear
+    market_data_filled_df = fill_market_data_gaps(market_data_df)
 
-    # Calculate the number of records added
-    updated_records = get_coin_market_data_record_count()
-    new_records = updated_records - initial_records
+    # upload the filled data to bigquery
+    upload_market_data_filled(market_data_filled_df)
 
-    logger.info('updated core.coin_market_data records: %s', updated_records)
-    logger.info('refreshed core.coin_market_data with %s new coingecko records.', new_records)
+    logger.info("Uploaded %s rows to core.coin_market_data.",
+                len(market_data_filled_df))
 
-    return f'{{"status":"200", "new_records": "{new_records}"}}'
-
-
-def get_coin_market_data_record_count():
-    '''
-    retrieves the count of total records in core.coin_market_data for logging purposes
-    '''
-
-    query_sql = '''
-        select count(*) as records
-        from core.coin_market_data
-        '''
-
-    df = dgc().run_sql(query_sql)
-    records = df.iloc[0, 0]
-
-    return records
-
+    return f'{{"status":"200", "new_records": "{len(market_data_filled_df)}"}}'
 
 
 def retrieve_raw_market_data():
-    '''
+    """
     adds new records in etl_pipelines.coin_market_data_coingecko to core.coin_market_data after
     normalizing and filling relevant fields
-    '''
+    """
     start_time = time.time()
 
-    query_sql = '''
+    query_sql = """
         with coingecko_market_data as (
             select md.date
             ,co.coin_id
@@ -123,7 +105,7 @@ def retrieve_raw_market_data():
         select * from coingecko_market_data
         union all
         select * from geckoterminal_market_data
-        '''
+        """
 
     market_data_df = dgc().run_sql(query_sql)
 
@@ -237,3 +219,21 @@ def fill_market_data_gaps(market_data_df):
 
 
     return market_data_filled_df
+
+
+
+def upload_market_data_filled(market_data_filled_df):
+    """
+    Uploads filled dataframe to the core.coin_market_data table
+
+    Parameters:
+        market_data_filled_df (DataFrame): The DataFrame containing the market data to upload.
+    """
+    destination_table = 'core.coin_market_data'
+    project_id = 'western-verve-411004'
+    pandas_gbq.to_gbq(
+        market_data_filled_df,
+        destination_table=destination_table,
+        project_id=project_id,
+        if_exists='replace'
+    )
