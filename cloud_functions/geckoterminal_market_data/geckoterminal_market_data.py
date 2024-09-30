@@ -384,6 +384,10 @@ def upload_combined_market_df(combined_market_df):
         'updated_at': 'datetime64[ns, UTC]'
     }
 
+    # Filter out records for the current UTC date
+    current_utc_date = pd.Timestamp.now(tz='UTC').normalize()
+    combined_market_df = combined_market_df[combined_market_df['date'] < current_utc_date]
+
     # Set updated_at time
     updated_at = datetime.datetime.now(utc).strftime('%Y-%m-%d %H:%M:%S')
     combined_market_df.loc[:, 'updated_at'] = updated_at

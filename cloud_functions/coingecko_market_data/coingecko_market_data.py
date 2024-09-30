@@ -328,6 +328,10 @@ def upload_market_data(market_df):
         none
     '''
 
+    # Filter out records for the current UTC date
+    current_utc_date = pd.Timestamp.now(tz='UTC').normalize()
+    market_df = market_df[market_df['date'] < current_utc_date]
+
     # add metadata to upload_df
     upload_df = pd.DataFrame()
     upload_df['date'] = market_df['date']
