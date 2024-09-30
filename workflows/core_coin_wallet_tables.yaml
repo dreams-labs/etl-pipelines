@@ -13,3 +13,12 @@ main:
             auth:
                 type: OIDC
             timeout: 1800
+
+    - updateCoreWalletProfits:
+        # update the coin.coin_wallet_profits table
+        call: http.get
+        args:
+            url: https://core-coin-wallet-profits-954736581165.us-west1.run.app
+            auth:
+                type: OIDC
+            timeout: 3000

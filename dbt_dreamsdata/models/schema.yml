@@ -83,6 +83,75 @@ models:
             - date
             - coin_id
 
+  - name: coin_wallet_transfers
+    description: "token-demoninated wallet activity"
+    meta:
+      schema: core
+    columns:
+      - name: date
+        description: "The date of the transfers"
+        data_tests:
+          - not_null
+      - name: coin_id
+        description: "coin_id"
+        data_tests:
+          - not_null
+      - name: wallet_address
+        description: "wallet address on the blockchain of the coin_id"
+        data_tests:
+          - not_null
+      - name: net_transfers
+        description: "the net amount transferred that day"
+        data_tests:
+        - not_null
+      - name: balance
+        description: "the wallet's balance of the coin_id"
+        data_tests:
+        - not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - date
+            - coin_id
+            - wallet_address
+
+  - name: coin_wallet_profits
+    description: "usd-demoninated wallet activity"
+    meta:
+      schema: core
+    columns:
+      - name: date
+        description: "The date of the transfers"
+        data_tests:
+          - not_null
+      - name: coin_id
+        description: "coin_id"
+        data_tests:
+          - not_null
+      - name: wallet_address
+        description: "wallet address on the blockchain of the coin_id"
+        data_tests:
+          - not_null
+      - name: usd_net_transfers
+        description: "the net amount transferred that day"
+        data_tests:
+        - not_null
+      - name: usd_balance
+        description: "the wallet's balance of the coin_id"
+        data_tests:
+        - not_null
+      - name: usd_inflows_cumulative
+        description: "the wallet's balance of the coin_id"
+        data_tests:
+        - not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - date
+            - coin_id
+            - wallet_address
+
+
   # ETL Pipelines Schema
   - name: coin_geckoterminal_metadata
     description: "Metadata for Geckoterminal coins"
