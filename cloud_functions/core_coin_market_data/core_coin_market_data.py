@@ -112,8 +112,9 @@ def retrieve_raw_market_data():
     # Dates as dates
     market_data_df['date'] = pd.to_datetime(market_data_df['date'])
 
-    # Convert coin_id column to categorical to reduce memory usage
+    # Convert object columns to categorical to reduce memory usage
     market_data_df['coin_id'] = market_data_df['coin_id'].astype('category')
+    market_data_df['data_source'] = market_data_df['data_source'].astype('category')
 
     # Downcast numeric columns to reduce memory usage
     market_data_df['price'] = pd.to_numeric(market_data_df['price'], downcast='float')
@@ -216,6 +217,7 @@ def fill_market_data_gaps(market_data_df):
 
     # coin_id as categorical
     market_data_filled_df['coin_id'] = market_data_filled_df['coin_id'].astype('category')
+    market_data_filled_df['data_source'] = market_data_filled_df['data_source'].astype('category')
 
 
     return market_data_filled_df
