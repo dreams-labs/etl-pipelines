@@ -1,7 +1,7 @@
 '''
 this function takes a user input blockchain and address and uses it to look up the
 token metadata and wallet transaction history. these are combined into a chart that
-is then returned to dreambot who shares it with the user. 
+is then returned to dreambot who shares it with the user.
 
 testable scenarios
 * valid solana address
@@ -22,7 +22,7 @@ testable scenarios
 
 dreambot input validation rules
     blockchain: string
-    address: string 
+    address: string
     whale_threshold_usd: int
     whale_threshold_tokens: int
     days_of_history: int
@@ -90,7 +90,7 @@ def run_bigquery_sql(
     query_job = client.query(query_sql)
     query_df = query_job.to_dataframe()
 
-    return(query_df)
+    return query_df
 
 
 def gcs_upload_file(
@@ -104,7 +104,7 @@ def gcs_upload_file(
     ):
     '''
     uploads a local file to public gcs and returns its access url
-    
+
     param: local_file <string> the location of a local file to upload
     param: gcs_folder <string> the folder in gcs to upload to, e.g. 'whale_charts/'
     param: gcs_filename <string> the name the gcs file will be given
@@ -139,7 +139,7 @@ def lookup_chain_ids(
 
     TODO TO IMPROVE LOGIC
     this should return a dictionary with all available references. the return
-    would be (chain_dict,match_outcome) and this new function could be 
+    would be (chain_dict,match_outcome) and this new function could be
     reusable and made universal
 
     TODO TO IMPROVE PERFORMANCE
@@ -271,7 +271,7 @@ def geckoterminal_metadata_search(
     token_dict = {}
 
     # making the api call
-    url = 'https://api.geckoterminal.com/api/v2/networks/'+blockchain+'/tokens/'+address
+    url = f'https://api.geckoterminal.com/api/v2/networks/{blockchain}/tokens/{address}'
     response = requests.request("GET", url)
     response_data = json.loads(response.text)
 
@@ -335,10 +335,10 @@ def dune_get_token_transfers(
         decimals
     ):
     '''
-    retrieves the daily net transfers from dune for each wallet that has transferred the given 
-    token, consolidated by day and wallet address to reduce ETL load and table size. 
+    retrieves the daily net transfers from dune for each wallet that has transferred the given
+    token, consolidated by day and wallet address to reduce ETL load and table size.
 
-    param: chain_text_dune <string> the dune text of the blockchain 
+    param: chain_text_dune <string> the dune text of the blockchain
     param: contract_address <string> the contract address of the token
     param: decimals <int> the number of decimals of the token
     return: transfers_df <dataframe> a dataframe with all historical transfers by wallet address
@@ -386,7 +386,7 @@ def get_whale_counts_from_transfers(
         pandas.DataFrame: df of daily s/m/whale wallet counts
     '''
     # set up logger
-    if logger is None: 
+    if logger is None:
         logger = logging.getLogger(__name__)
         logger.setLevel(logging.ERROR)
 
@@ -442,8 +442,8 @@ def upload_transfers_to_bigquery(
         verbose=False
     ):
     '''
-    uploads token transfers to bigquery if no records exist for this token. if 
-    records do exist they should be kept fresh by another pipelines. 
+    uploads token transfers to bigquery if no records exist for this token. if
+    records do exist they should be kept fresh by another pipelines.
 
     parameters:
         transfers_df (pandas.DataFrame): df of token transfers
@@ -468,7 +468,7 @@ def upload_transfers_to_bigquery(
     if query_df.iloc[0,0] == 0:
         if verbose:
             print(f'uploading {str(len(transfers_df))} records for <{chain_text_dune}:{contract_address}>')
-        
+
         # add metadata to upload_df
         upload_df = pd.DataFrame()
         upload_df['date'] = transfers_df['date']
@@ -526,7 +526,7 @@ def draw_whale_chart(
         ,verbose=False
     ):
     '''
-    TODO: improve efficiency of border process to not save/load file, which 
+    TODO: improve efficiency of border process to not save/load file, which
     causes performance issues in GCF
 
     draws the whale chart and saves it as a png file
@@ -535,12 +535,12 @@ def draw_whale_chart(
     param: whale_threshold_usd <int> the usd whale threshold submitted by the user
     param: whale_threshold_tokens <int> the token threshold used in the dune query
     param: token_dict <dict> standardized dictionary of token metadata
-    param: verbose <boolean> whether to print each step 
+    param: verbose <boolean> whether to print each step
     return: whale_chart <image> an img library image
     '''
-    if verbose: 
-        print('charting: starting function...') 
-    
+    if verbose:
+        print('charting: starting function...')
+
     # create 'date' column that will be used for x axis
     query_df = query_df.reset_index()
     query_df = query_df.rename(columns={'index': 'date'})
@@ -561,7 +561,7 @@ def draw_whale_chart(
         paper_bgcolor='#131722',
         plot_bgcolor='#131722',
         font=dict(
-            family='Sans Serif', # tentabs:I want to use a custom fonts but can't get plotly to recognize a ttf
+            family='Sans Serif',
             color='white',
             size=18
         ),
@@ -572,9 +572,9 @@ def draw_whale_chart(
             r=0
         )
     )
-    if verbose: 
+    if verbose:
             print('charting: setting variables...')
-    
+
     # define title and annotations based on coingecko metadata
     symbol = token_dict['symbol']
     name = token_dict['name']
@@ -587,7 +587,7 @@ def draw_whale_chart(
         mc = 'Unknown'
     fdv = dc.human_format(token_dict['fdv'])
 
-    if verbose: 
+    if verbose:
         print('charting: adding annotations...')
     # add title
     fig.update_layout(
@@ -600,7 +600,7 @@ def draw_whale_chart(
     )
     # add annotations
     fig.add_annotation(
-        text=str('Whale Threshold: $'+dc.human_format(whale_threshold_usd)+' USD').replace('$','&#36;'),
+        text=f'Whale Threshold: ${dc.human_format(whale_threshold_usd)} USD'.replace('$','&#36;'),
         font=dict(size=24),
         xref='paper', yref='paper',
         x=0.040, y=1.06,
@@ -636,7 +636,7 @@ def draw_whale_chart(
     )
 
     # add logo
-    if verbose: 
+    if verbose:
         print('charting: adding logo...')
     # this function doesn't work in vscode so using the url instead
     # logo = gcs_load_image('assets/images/whale_watch_logo_cropped.png')
@@ -651,8 +651,8 @@ def draw_whale_chart(
     )
 
     # Add traces
-    if verbose: 
-        print('charting: adding traces...') 
+    if verbose:
+        print('charting: adding traces...')
     fig.add_trace(
         go.Scatter(
             x=query_df['date'],
@@ -765,10 +765,10 @@ def draw_whale_chart(
         )
     )
 
-    # TODO: this step has the most performance issues out of the charting 
-    # process. if this can be done in a way that doesn't save/load multiple 
+    # TODO: this step has the most performance issues out of the charting
+    # process. if this can be done in a way that doesn't save/load multiple
     # files it will improve overall command response times
-    if verbose: 
+    if verbose:
         print('charting: adding border...')
 
     # duct tape method to apply a green border to the image
@@ -803,7 +803,7 @@ def log_whale_chart_request(
     params: all inputs and outputs
     param: processing_time <int> the seconds it took for the full cloud function to run
     param: dune_total_time <int> the seconds it took for dune to go through all api states
-    param: dune_execution_time <int> the seconds it took for dune go through the QUERY_EXECUTING state
+    param: dune_execution_time <int> the seconds it took for dune finish the QUERY_EXECUTING state
     param: request_json <json> the raw json input
     '''
     client = bigquery.Client()
@@ -853,7 +853,7 @@ def whales_chart_wrapper(
     return: function_result_detail <string> either the whale chart url or technical error details
     return: discord_message <string> the error message that should be sent to the user
     return: dune_total_time <int> the seconds it took for dune to go through all api states
-    return: dune_execution_time <int> the seconds it took for dune go through the QUERY_EXECUTING state
+    return: dune_execution_time <int> the seconds it took for dune finish the QUERY_EXECUTING state
     '''
     # declare dune duration variables in case attempt never reaches dune stage
     dune_execution_time = 0
@@ -883,7 +883,7 @@ def whales_chart_wrapper(
         return(api_response_code,function_result_summary,function_result_detail,discord_message,dune_execution_time,dune_total_time)
 
     # set the contract address to be lowercase if the chain is not case sensitive:
-    if chain_case_sensitive==False:
+    if chain_case_sensitive is False:
         contract_address = contract_address.lower()
 
     # # TODO: threshold validation logic needs to incorporate whale_threshold_tokens
@@ -900,7 +900,7 @@ def whales_chart_wrapper(
 
     ### GETTING TOKEN METADATA ###
     # attempt coingecko search
-    # the try/except logic is included because some coins have arbitrarily different api response data structure 
+    # the try/except logic is included because some coins have arbitrarily different api response data structure
     # that breaks the code, e.g. '0x39142c18b6db2a8a41b7018f49e1478837560cad' on 'eth'
     try:
         coingecko_status_code,token_dict = coingecko_metadata_search(
@@ -939,23 +939,23 @@ def whales_chart_wrapper(
         whale_threshold_usd = .01*token_dict['fdv']
         if verbose:
             print(f'reducing whale threshold usd to {whale_threshold_usd}')
-    
+
     # calculate (or restate) whale token threshold
     whale_threshold_tokens = whale_threshold_usd/token_dict['price']
 
     # calculate shrimp token threshold which has a max of $1000 USD. wallets with less than this
     # are counted as small
-    if whale_threshold_usd > 20000: 
+    if whale_threshold_usd > 20000:
         shrimp_threshold_usd = 1000
     else:
         shrimp_threshold_usd = whale_threshold_usd/20
-    shrimp_threshold_tokens = shrimp_threshold_usd/whale_threshold_usd
+    shrimp_threshold_tokens = shrimp_threshold_usd/whale_threshold_usd * whale_threshold_tokens
 
 
     ### GET COIN TRANSFER HISTORY ###
     # get list of tokens that have transfers data in bigquery
     if verbose:
-        print(f'checking if token exists in bigquery...')
+        print('checking if token exists in bigquery...')
     query_sql = '''
         select token_address
         from `etl_pipelines.coin_wallet_net_transfers`
@@ -967,7 +967,7 @@ def whales_chart_wrapper(
     # if it already exists in bigquery, get it from there
     if contract_address in tokens_with_data:
         if verbose:
-            print(f'token found. retrieving transfers from bigquery...')
+            print('token found. retrieving transfers from bigquery...')
         query_sql = f'''
             select date
             ,wallet_address
@@ -994,11 +994,12 @@ def whales_chart_wrapper(
         if transfers_df.shape[0]==0:
             api_response_code = 400
             function_result_summary = 'insufficient dune data'
-            function_result_detail = f'dune database shows no transactions'
+            function_result_detail = 'dune database shows no transactions'
             discord_message = 'Dune database does not have a transaction history for this token. Tokens must have 2+ days of history for a chart to generate.'
             if verbose:
                 print(function_result_detail)
-            return(api_response_code,function_result_summary,function_result_detail,discord_message,dune_execution_time,dune_total_time)
+            return(api_response_code, function_result_summary, function_result_detail,
+                   discord_message,dune_execution_time,dune_total_time)
 
         # upload token transfer data to bigquery if it doesn't already exist
         if verbose:
@@ -1013,7 +1014,8 @@ def whales_chart_wrapper(
     # convert transfer data into daily counts of wallets by size
     if verbose:
         print('calculating daily whale counts...')
-    whales_df = get_whale_counts_from_transfers(transfers_df, whale_threshold_tokens, shrimp_threshold_tokens)
+    whales_df = get_whale_counts_from_transfers(
+        transfers_df, whale_threshold_tokens, shrimp_threshold_tokens)
     api_response_code = 200
 
     # API CODE 400: insufficient dune history
@@ -1032,7 +1034,7 @@ def whales_chart_wrapper(
         # make the chart
         if verbose:
             print('drawing chart...')
-        whale_chart = draw_whale_chart(
+        _ = draw_whale_chart(
             whales_df,
             whale_threshold_usd,
             whale_threshold_tokens,
@@ -1058,10 +1060,11 @@ def whales_chart_wrapper(
         # API CODE 200: success
         api_response_code = 200
         function_result_summary = 'success'
-        function_result_detail = gcs_upload_file(local_file,gcs_folder,gcs_filename,delete_local_file=True)
+        function_result_detail = gcs_upload_file(
+            local_file,gcs_folder,gcs_filename,delete_local_file=True)
         discord_message = 'Successfully generated whale chart for '+token_dict['name']
         if token_dict['source']=='coingecko':
-             discord_message = str(discord_message+' (https://www.coingecko.com/en/coins/'+token_dict['source_id']+')')
+             discord_message = f"{discord_message} (https://www.coingecko.com/en/coins/'{token_dict['source_id']})"
         if verbose:
             print('chart successfully generated.')
 
