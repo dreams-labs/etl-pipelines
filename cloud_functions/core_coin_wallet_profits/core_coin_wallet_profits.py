@@ -5,6 +5,7 @@ columns, int32, and dropping columns as soon as they are no longer needed.
 """
 import time
 import gc
+import logging
 import pandas as pd
 import numpy as np
 import functions_framework
@@ -14,6 +15,7 @@ from dreams_core import core as dc
 
 # set up logger at the module level
 logger = dc.setup_logger()
+logger.setLevel(logging.DEBUG)
 
 
 @functions_framework.http
@@ -57,7 +59,7 @@ def retrieve_transfers_data():
         memory optimization
     """
     start_time = time.time()
-    logger.debug('Retrieving transfers data...')
+    logger.info('Retrieving transfers data...')
 
 
     # SQL query to retrieve transfers data
@@ -112,7 +114,7 @@ def retrieve_prices_df():
     - coin_id_mapping: Categories for coin_id.
     """
     start_time = time.time()
-    logger.debug('Retrieving market data...')
+    logger.info('Retrieving market data...')
 
     # SQL query to retrieve market data
     query_sql = """
@@ -179,7 +181,7 @@ def prepare_profits_data(transfers_df, prices_df):
         that had balances prior to the first available price date for each coin.
     """
     start_time = time.time()
-    logger.debug('Imputing rows based on prices-transfers data availability...')
+    logger.info('Imputing rows based on prices-transfers data availability...')
 
 
     # Raise an error if either df is empty
@@ -210,7 +212,7 @@ def prepare_profits_data(transfers_df, prices_df):
     # Ensure 'coin_id' is still categorical after the merge
     profits_df['coin_id'] = profits_df['coin_id'].astype('category')
 
-    logger.debug("<Step 1> merge transfers and prices: %.2f seconds",
+    logger.info("<Step 1> merge transfers and prices: %.2f seconds",
                  time.time() - start_time)
     step_time = time.time()
 
@@ -227,7 +229,7 @@ def prepare_profits_data(transfers_df, prices_df):
 
     # Merge the first price data into profits_df
     profits_df = profits_df.merge(first_prices_df, on='coin_id', how='inner')
-    logger.debug("<Step 2> identify first prices of coins: %.2f seconds",
+    logger.info("<Step 2> identify first prices of coins: %.2f seconds",
                  time.time() - step_time)
     step_time = time.time()
 
@@ -257,7 +259,7 @@ def prepare_profits_data(transfers_df, prices_df):
     # # Select necessary columns for new records
     new_records = new_records[['coin_id', 'wallet_address', 'date', 'net_transfers',
                             'balance', 'price', 'first_price_date', 'first_price']]
-    logger.debug("<Step 3> created new records as of the first_price_date: %.2f seconds"
+    logger.info("<Step 3> created new records as of the first_price_date: %.2f seconds"
                  , time.time() - step_time)
     step_time = time.time()
 
@@ -275,7 +277,7 @@ def prepare_profits_data(transfers_df, prices_df):
     # Sort by coin_id, wallet_address, and date to maintain order
     profits_df = (profits_df.sort_values(by=['coin_id', 'wallet_address', 'date'])
                   .reset_index(drop=True))
-    logger.debug("<Step 4> merge new records into profits_df: %.2f seconds",
+    logger.info("<Step 4> merge new records into profits_df: %.2f seconds",
                  time.time() - step_time)
     step_time = time.time()
 
@@ -297,7 +299,7 @@ def prepare_profits_data(transfers_df, prices_df):
     # remove records prior to positive token_inflows
     profits_df = profits_df[profits_df['token_inflows_cumulative']>0]
 
-    logger.debug("<Step 5> removed records before each wallet's first token inflows: %.2f seconds",
+    logger.info("<Step 5> removed records before each wallet's first token inflows: %.2f seconds",
                  time.time() - step_time)
     step_time = time.time()
 
@@ -353,7 +355,7 @@ def calculate_wallet_profitability(profits_df):
     - ValueError: If any missing prices are found in the `profits_df`.
     """
     start_time = time.time()
-    logger.debug('Calculating coin-wallet level profitability...')
+    logger.info('Calculating coin-wallet level profitability...')
 
     # Raise an error if there are any missing prices
     if profits_df['price'].isnull().any():
@@ -371,7 +373,7 @@ def calculate_wallet_profitability(profits_df):
         .shift(1).fillna(0))
     profits_df['coin_id'] = profits_df['coin_id'].astype('category')
 
-    logger.debug("Offset prices and balances for profitability logic: %.2f seconds",
+    logger.info("Offset prices and balances for profitability logic: %.2f seconds",
                  time.time() - start_time)
     step_time = time.time()
 
@@ -390,7 +392,7 @@ def calculate_wallet_profitability(profits_df):
         .cumsum()).astype('float32')
     profits_df['coin_id'] = profits_df['coin_id'].astype('category')
 
-    logger.debug("Calculate profitability: %.2f seconds", time.time() - step_time)
+    logger.info("Calculate profitability: %.2f seconds", time.time() - step_time)
     step_time = time.time()
 
     # Calculate USD inflows, balances, and rate of return
@@ -423,7 +425,7 @@ def calculate_wallet_profitability(profits_df):
     # Final recategorization
     profits_df['coin_id'] = profits_df['coin_id'].astype('category')
 
-    logger.debug("Calculate rate of return %.2f seconds", time.time() - step_time)
+    logger.info("Calculate rate of return %.2f seconds", time.time() - step_time)
     step_time = time.time()
 
     return profits_df
@@ -437,6 +439,10 @@ def upload_profits_data(profits_df):
     Parameters:
         profits_df (DataFrame): The DataFrame containing the profits data to upload.
     """
+    start_time = time.time()
+    logger.info('Uploading profits_df with dimensions %s...'
+                , profits_df.shape)
+
     # Apply explicit typecasts
     profits_df['date'] = pd.to_datetime(profits_df['date'])
     profits_df['coin_id'] = profits_df['coin_id'].astype(str)
@@ -473,3 +479,5 @@ def upload_profits_data(profits_df):
         if_exists='replace',
         table_schema=schema
     )
+    logger.info("Upload to core.coin_wallet_profits complete after %.2f seconds",
+                time.time() - start_time)
