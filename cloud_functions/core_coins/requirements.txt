@@ -1,2 +1,2 @@
 functions-framework==3.*
-dreams_core==0.2.21
+dreams_core==0.2.23

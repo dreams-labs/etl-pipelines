@@ -1,0 +1,5 @@
+functions-framework==3.*
+requests>=2.31.0
+google-cloud-bigquery>=3.8.0  # For BigQuery client
+google-cloud-storage>=2.10.0  # For Google Cloud Storage client
+dreams_core==0.2.22

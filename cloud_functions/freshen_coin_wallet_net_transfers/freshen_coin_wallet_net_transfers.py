@@ -2,11 +2,12 @@
 provides updated whale chart data by following this sequence:
 1. updates the dune table net_transfers_state with the current state of the bigquery table \
     etl_pipelines.coin_wallet_net_transfers
+2. generates a dune query for all blockchains in need of updates and unions them together
+3. retreives the dune results and uploads them to bigquery
 
 '''
 import datetime
 import os
-import logging
 import json
 import pandas as pd
 from dune_client.client import DuneClient
@@ -21,7 +22,7 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
-def freshen_coin_wallet_net_transfers(request):
+def freshen_coin_wallet_net_transfers(request):  # pylint: disable=W0613
     '''
     runs all functions in sequence to complete all update steps
     '''
@@ -35,7 +36,8 @@ def freshen_coin_wallet_net_transfers(request):
     full_query = generate_net_transfers_update_query(update_chains)
 
     # retrieve the fresh dune data using the generated query
-    transfers_df = get_fresh_dune_data(full_query)
+    transfers_json = get_fresh_dune_data(full_query)
+    transfers_df = pd.DataFrame(transfers_json)
 
     # upload the fresh dune data to bigquery
     append_to_bigquery_table(freshness_df,transfers_df)
@@ -46,11 +48,11 @@ def freshen_coin_wallet_net_transfers(request):
 
 def update_dune_freshness_table():
     '''
-    updates the dune table etl_net_transfers_freshness with the current state of the bigquery table 
+    updates the dune table etl_net_transfers_freshness with the current state of the bigquery table
     etl_pipelines.coin_wallet_net_transfers.
 
-    the number of new records from core.coins that will be added to etl_pipelines.coin_wallet_net_transfers
-    is determined by the limit in the `new_records` CTE. 
+    the number of new records from core.coins that will be added to
+    etl_pipelines.coin_wallet_net_transfers is determined by the limit in the `new_records` CTE.
 
     params: None
     returns:
@@ -74,12 +76,27 @@ def update_dune_freshness_table():
             ,cast('2000-01-01' as datetime) as freshest_date
             from core.coins c
             join core.chains ch on ch.chain_id = c.chain_id
+            join (
+                select coin_id
+                ,max(coalesce(market_cap,price*total_supply)) as max_market_cap
+                from core.coin_market_data
+                group by 1
+            ) cap_size on cap_size.coin_id = c.coin_id
             left join existing_records e on e.token_address = c.address
                 and e.chain = ch.chain_text_dune
-            where ch.chain_text_dune is not null -- only include dune-supported blockchains
-            and e.token_address is null -- only include coins without existing transfer data
-            and c.decimals is not null -- currently decimals are required to run the dune queries but this could be refactored
-            limit 25
+
+            -- new coins don't have existing transfer data
+            where e.token_address is null
+
+             -- new coins must have dune-supported blockchains
+            and ch.chain_text_dune is not null
+
+            -- new coins currently need decimal data to run the dune queries
+            and c.decimals is not null
+
+            -- max market cap is used to prioritize smaller coins with lower credit cost
+            order by cap_size.max_market_cap asc
+            limit 15
         )
         select chain
         ,token_address
@@ -90,6 +107,22 @@ def update_dune_freshness_table():
             select * from existing_records
             -- union all
             -- select * from new_records
+        )
+
+        -- do not update solana tokens with negative wallets per dune
+        -- source: https://dune.com/queries/4094516
+        -- dune github ticket: https://github.com/duneanalytics/spellbook/issues/6690
+        where token_address not in (
+            'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm'
+            ,'25hAyBQfoDhfWx9ay6rarbgvWGwDdNqcHsXS3jQ3mTDJ'
+            ,'FU1q8vJpZNUrmqsciSjp8bAKKidGsLmouB8CBdf8TKQv'
+            ,'5z3EqYQo9HiCEs3R84RCDMu2n7anpDMxRhdK8PSWmrRC'
+            ,'69kdRLyP5DTRkpHraaSZAQbWmAwzF9guKjZfzMXzcbAs'
+            ,'GtDZKAqvMZMnti46ZewMiXCa4oXF4bZxwQPoKzXPFxZn'
+            ,'52DfsNknorxogkjqecCTT3Vk2pUwZ3eMnsYKVm4z3yWy'
+            ,'BSHanq7NmdY6j8u5YE9A3SUygj1bhavFqb73vadspkL3'
+            ,'DcUoGUeNTLhhzyrcz49LE7z3MEFwca2N9uSw1xbVi1gm'
+            ,'5LafQUrVco6o7KMz42eqVEJ9LW31StPyGjeeu5sKoMtA'
         )
     '''
     freshness_df = dgc().run_sql(query_sql)
@@ -121,7 +154,7 @@ def generate_net_transfers_update_query(dune_chains):
     '''
     generates a long dune sql query that includes a separate CTE for each applicable blockchain \
     and unions them all together. the query will return all wallet-coin-days needed to fully \
-    freshen the etl_pipelines.coin_wallet_net_transfers table in bigquery. 
+    freshen the etl_pipelines.coin_wallet_net_transfers table in bigquery.
 
     the function starts with long dune sql queries to get solana transfers and a template to \
     get transfers from any of the erc20 chains. these are then merged into a complete sql query.
@@ -130,10 +163,10 @@ def generate_net_transfers_update_query(dune_chains):
         dune_chains <set>: a set of all blockchains that need freshness updates
 
     returns:
-        full_query <str>: the long dune query that will return all wallet-coin-days needed to update 
+        full_query <str>: the long dune query that will generates the wallet-coin-day-transfers
     '''
 
-    # query to retrieve solana transfers (solana tables have a different structure than erc20 chains)
+    # query to retrieve solana transfers (solana tables have different structure than erc20 tables)
     sol_query = '''
         with solana as (
             --  retrieving the most recent batch of bigquery records available in dune
@@ -149,8 +182,8 @@ def generate_net_transfers_update_query(dune_chains):
                 )
                 where batch_recency = 1
             ),
-            
-            -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
+
+            -- filter transfers on index (block_date) to improve query performance
             transfers_filtered as (
                 -- find the earliest possible date that we need data for
                 with most_out_of_date as (
@@ -159,21 +192,20 @@ def generate_net_transfers_update_query(dune_chains):
                     where ts.chain = 'solana'
                 )
                 select 'solana' as chain
-                ,t.block_time
+                ,t.block_date
                 ,t.from_token_account
                 ,t.to_token_account
                 ,t.token_mint_address
                 ,t.amount
                 from tokens_solana.transfers t
                 -- remove all rows earlier than the earliest possible relevant date
-                where date_trunc('day', t.block_time at time zone 'UTC') > (select date from most_out_of_date)
+                where t.block_date > (select date from most_out_of_date)
                 -- remove rows from today since the daily net totals aren't finalized
-                and date_trunc('day', t.block_time at time zone 'UTC') < 
-                    date(current_timestamp at time zone 'UTC')
+                and t.block_date < date(current_timestamp at time zone 'UTC')
             ),
             transfers as (
                 select t.chain
-                ,date_trunc('day', t.block_time at time zone 'UTC') as date
+                ,t.block_date as date
                 ,t.from_token_account as address
                 ,-cast(t.amount as double) as amount
                 ,token_mint_address as contract_address
@@ -181,12 +213,12 @@ def generate_net_transfers_update_query(dune_chains):
                 join current_net_transfers_freshness ts
                     on ts.token_address = t.token_mint_address
                     and ts.chain = t.chain
-                    and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
-                
+                    and t.block_date > cast(ts.freshest_date as date)
+
                 union all
-                
+
                 select t.chain
-                ,date_trunc('day', t.block_time at time zone 'UTC') as date
+                ,t.block_date as date
                 ,t.to_token_account as address
                 ,cast(t.amount as double) as amount
                 ,token_mint_address as contract_address
@@ -194,7 +226,7 @@ def generate_net_transfers_update_query(dune_chains):
                 join current_net_transfers_freshness ts
                     on ts.token_address = t.token_mint_address
                     and ts.chain = t.chain
-                    and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
+                    and t.block_date > cast(ts.freshest_date as date)
             ),
             daily_net_transfers as (
                 select chain
@@ -202,10 +234,10 @@ def generate_net_transfers_update_query(dune_chains):
                 ,address
                 ,contract_address
                 ,sum(amount) as amount
-                from transfers  
+                from transfers
                 group by 1,2,3,4
             )
-            
+
             select json_object(
                 'date': date
                 ,'chain': chain
@@ -235,8 +267,8 @@ def generate_net_transfers_update_query(dune_chains):
                 )
                 where batch_recency = 1
             ),
-            
-            -- filter the transfers table on indexed columns (block_time) to improve subsequent query performance
+
+            -- filter transfers on index column 'block_time' to improve performance
             transfers_filtered as (
                 -- find the earliest possible date that we need data for
                 with most_out_of_date as (
@@ -254,7 +286,7 @@ def generate_net_transfers_update_query(dune_chains):
                 -- remove all rows earlier than the earliest possible relevant date
                 where date_trunc('day', t.evt_block_time at time zone 'UTC') > (select date from most_out_of_date)
                 -- remove rows from today since the daily net totals aren't finalized
-                and date_trunc('day', t.evt_block_time at time zone 'UTC') < 
+                and date_trunc('day', t.evt_block_time at time zone 'UTC') <
                     date(current_timestamp at time zone 'UTC')
             ),
             transfers as (
@@ -268,9 +300,9 @@ def generate_net_transfers_update_query(dune_chains):
                     on ts.token_address = t.token_mint_address
                     and ts.chain = t.chain
                     and date_trunc('day', t.block_time at time zone 'UTC') > cast(ts.freshest_date as date)
-                
+
                 union all
-                
+
                 select t.chain
                 ,date_trunc('day', t.block_time at time zone 'UTC') as date
                 ,t.to_token_account as address
@@ -288,7 +320,7 @@ def generate_net_transfers_update_query(dune_chains):
                 ,address
                 ,contract_address
                 ,sum(amount) as amount
-                from transfers  
+                from transfers
                 group by 1,2,3,4
             )
 
@@ -330,7 +362,7 @@ def get_fresh_dune_data(full_query):
     params:
         full_query (str): sql query to run
     returns:
-        transfers_df (pandas.DataFrame): df of token transfers without decimal calculations applied
+        transfers_json (json): json of token transfers without decimal calculations applied
     '''
     dune = DuneClient.from_env()
 
@@ -353,17 +385,16 @@ def get_fresh_dune_data(full_query):
     logger.info('fetched fresh dune data with %s rows.', len(transfers_json_df))
 
     # expand the json data into df columns
-    json_data = [json.loads(record) for record in transfers_json_df['transfers_json']]
-    transfers_df = pd.DataFrame(json_data)
+    transfers_json = [json.loads(record) for record in transfers_json_df['transfers_json']]
     logger.info('completed translation from dune export json to dataframe.')
 
-    return transfers_df
+    return transfers_json
 
 
 def append_to_bigquery_table(freshness_df,transfers_df):
     '''
     uploads the new transfers data to bigquery to ensure the table is fully refreshed through
-    the last full UTC day. 
+    the last full UTC day.
 
     steps:
         1. map decimals data from bigquery onto the retrieved dune data and
@@ -380,7 +411,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
 
     # Check if transfers_df is empty and terminate upload process if so
     if transfers_df.empty:
-        logger.warning('No new wallet transfer data to upload to BigQuery as transfers_df is empty.')
+        logger.warning('No new wallet transfer data to append as transfers_df is empty.')
         return
 
 
