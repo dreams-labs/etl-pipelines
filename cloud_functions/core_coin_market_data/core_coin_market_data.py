@@ -219,6 +219,8 @@ def fill_market_data_gaps(market_data_df):
     market_data_filled_df['coin_id'] = market_data_filled_df['coin_id'].astype('category')
     market_data_filled_df['data_source'] = market_data_filled_df['data_source'].astype('category')
 
+    # remove timezone for consistent joins
+    market_data_filled_df['date'] = market_data_filled_df['date'].dt.tz_localize(None)
 
     return market_data_filled_df
 
@@ -231,11 +233,42 @@ def upload_market_data_filled(market_data_filled_df):
     Parameters:
         market_data_filled_df (DataFrame): The DataFrame containing the market data to upload.
     """
-    destination_table = 'core.coin_market_data'
+    # Apply explicit typecasts
+    # pylint: disable=C0301
+    market_data_filled_df['date'] = pd.to_datetime(market_data_filled_df['date'])
+    market_data_filled_df['coin_id'] = market_data_filled_df['coin_id'].astype(str)
+    market_data_filled_df['price'] = market_data_filled_df['price'].astype(float)
+    market_data_filled_df['volume'] = market_data_filled_df['volume'].astype('int64')
+    market_data_filled_df['market_cap'] = market_data_filled_df['market_cap'].astype('int64')
+    market_data_filled_df['fdv'] = market_data_filled_df['fdv'].astype('int64')
+    market_data_filled_df['circulating_supply'] = market_data_filled_df['circulating_supply'].astype('int64')
+    market_data_filled_df['total_supply'] = market_data_filled_df['total_supply'].astype('int64')
+    market_data_filled_df['data_source'] = market_data_filled_df['data_source'].astype(str)
+    market_data_filled_df['updated_at'] = pd.to_datetime(market_data_filled_df['updated_at'])
+    market_data_filled_df['days_imputed'] = market_data_filled_df['days_imputed'].astype(float)
+
+    # Define the schema
+    schema = [
+        {'name': 'date', 'type': 'DATETIME'},
+        {'name': 'coin_id', 'type': 'STRING'},
+        {'name': 'price', 'type': 'FLOAT'},
+        {'name': 'volume', 'type': 'INTEGER'},
+        {'name': 'market_cap', 'type': 'INTEGER'},
+        {'name': 'fdv', 'type': 'INTEGER'},
+        {'name': 'circulating_supply', 'type': 'INTEGER'},
+        {'name': 'total_supply', 'type': 'INTEGER'},
+        {'name': 'data_source', 'type': 'STRING'},
+        {'name': 'updated_at', 'type': 'DATETIME'},
+        {'name': 'days_imputed', 'type': 'FLOAT'}
+    ]
+
+    # upload df to bigquery
     project_id = 'western-verve-411004'
+    destination_table = 'core.coin_market_data'
     pandas_gbq.to_gbq(
         market_data_filled_df,
         destination_table=destination_table,
         project_id=project_id,
-        if_exists='replace'
+        if_exists='replace',
+        table_schema=schema
     )
