@@ -2,8 +2,8 @@
 cloud function that runs a query to refresh the data in bigquery table core.coin_market_data
 '''
 import time
-import logging
 import pandas as pd
+import numpy as np
 import functions_framework
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
@@ -18,13 +18,6 @@ def update_coin_market_data(request): # pylint: disable=unused-argument  # noqa:
     '''
     runs all functions in sequence to refresh core.coin_market_data
     '''
-    # configure logger
-    logging.basicConfig(
-        level=logging.INFO,
-        format='[%(asctime)s] %(levelname)s [%(name)s.%(funcName)s:%(lineno)d] %(message)s',
-        datefmt='%d/%b/%Y %H:%M:%S'
-        )
-    logger = logging.getLogger(__name__)
 
     # retrieve initial record count
     initial_records = get_coin_market_data_record_count()
@@ -71,9 +64,8 @@ def retrieve_raw_market_data():
         with coingecko_market_data as (
             select md.date
             ,co.coin_id
-            ,co.chain_id
-            ,co.address
             ,md.price
+            ,md.volume
 
             -- use fdv if market cap data isn't available
             ,case
@@ -93,7 +85,6 @@ def retrieve_raw_market_data():
             -- total supply retrieved from coingecko metadata tables
             ,cast(co.total_supply as int64) as total_supply
 
-            ,md.volume
             ,'coingecko' as data_source
             ,md.updated_at
             from core.coins co
@@ -103,23 +94,21 @@ def retrieve_raw_market_data():
         geckoterminal_market_data as (
             select md.date
             ,co.coin_id
-            ,co.chain_id
-            ,co.address
             ,cast(md.close as bignumeric) as price
+            ,cast(md.volume as int64) as volume
 
-            -- geckoterminal doesn't provide market cap
-            ,null as market_cap
+            -- geckoterminal doesn't provide market cap so use fdv as as market cap
+            ,cast(md.close*co.total_supply as int64) as market_cap
 
             -- calculate fdv using total supply
             ,cast(md.close*co.total_supply as int64) as fdv
 
-            -- geckoterminal doesn't provide market cap to calculate circulating supply with
-            ,null as circulating_supply
+            -- geckoterminal doesn't provide circulating supply so use total supply
+            ,cast(co.total_supply as int64) as circulating_supply
 
             -- total supply retrieved from coingecko metadata tables
             ,cast(co.total_supply as int64) as total_supply
 
-            ,cast(md.volume as int64)
             ,'geckoterminal' as data_source
             ,md.updated_at
             from core.coins co
@@ -153,3 +142,98 @@ def retrieve_raw_market_data():
                 round(time.time() - start_time))
 
     return market_data_df
+
+
+
+def fill_market_data_gaps(market_data_df):
+    """
+    Forward-fills small gaps in market data for each coin_id. The function first confirms that
+    there are no null values in any metric columns of the df, then uses price to identify dates that
+    need to be filled for all of the metric columns.
+
+    Parameters:
+    - market_data_df: DataFrame containing market data keyed on coin_id-date
+
+    Returns:
+    - market_data_filled_df: DataFrame with small gaps forward-filled, excluding coins with gaps
+        too large to fill.
+    """
+
+    # Confirm there are no null values in the input df
+    if market_data_df.isna().sum().sum() > 0:
+        raise ValueError("Market data df contains null values")
+
+    # Define the max date that all coins will be filled through
+    max_date = market_data_df['date'].max()
+    logger.info("Filling market data records for all coins through %s...",
+                max_date.strftime('%Y-%m-%d'))
+
+    # Get unique coin_ids
+    unique_coins = market_data_df['coin_id'].unique()
+
+    # List to store results
+    filled_results = []
+
+    # Iterate over each coin_id
+    for coin_id in unique_coins:
+
+        # Step 1: Reindex to create rows for all missing dates
+        # ----------------------------------------------------
+        coin_df = (market_data_df[market_data_df['coin_id'] == coin_id]
+                   .sort_values('date', ascending=True).copy())
+
+        # Create the full date range
+        full_date_range = pd.date_range(start=coin_df['date'].min(), end=max_date, freq='D')
+
+        # Reindex to get all dates
+        coin_df = (coin_df.set_index('date').reindex(full_date_range)
+                   .rename_axis('date').reset_index())
+
+        # Step 2: Calculate days_imputed
+        # ----------------------------------------------------
+        # Create imputation_groups, which are streaks of days that all have empty prices
+        coin_df['imputation_group'] = (             # IF...
+            coin_df['price'].notnull()              # the row has a price...
+            | (                                     # OR is a price gap of 1 row, defined as
+                coin_df['price'].isnull()               # ( the row doesn't have a price
+                & coin_df['price'].shift().notnull()    # AND the previous date had a price )
+            )
+        ).cumsum()                                  # THEN increment to the next imputation_group
+
+        # Calculate days_imputed by counting how many records in a row are in each imputation_group
+        coin_df['days_imputed'] = coin_df.groupby('imputation_group').cumcount() + 1
+
+        # Set records that have price data to have null days_imputed
+        coin_df.loc[coin_df['price'].notnull(), 'days_imputed'] = np.nan
+
+
+        # Step 3: Fill the imputed rows, assuming price stays the same and there is 0 volume
+        # ----------------------------------------------------------------------------------
+        coin_df['coin_id'] = coin_id
+        coin_df['price'] = coin_df['price'].ffill()
+        coin_df['volume'] = coin_df['volume'].fillna(0)
+        coin_df['market_cap'] = coin_df['market_cap'].ffill()
+        coin_df['fdv'] = coin_df['fdv'].ffill()
+        coin_df['circulating_supply'] = coin_df['circulating_supply'].ffill()
+        coin_df['total_supply'] = coin_df['total_supply'].ffill()
+        coin_df['data_source'] = coin_df['data_source'].ffill()
+        # coin_df['updated_at'] is left with nulls for imputed records
+        # coin_df['days_imputed'] is left as a data lineage tool
+
+        # Drop the 'imputation_group' helper column
+        coin_df = coin_df.drop(columns=['imputation_group'])
+
+        # Append to the result list
+        filled_results.append(coin_df)
+
+    # Concatenate all results
+    if filled_results:
+        market_data_filled_df = pd.concat(filled_results).reset_index(drop=True)
+    else:
+        market_data_filled_df = pd.DataFrame()  # Handle case where no coins were filled
+
+    # coin_id as categorical
+    market_data_filled_df['coin_id'] = market_data_filled_df['coin_id'].astype('category')
+
+
+    return market_data_filled_df
