@@ -56,7 +56,7 @@ def get_secret(
     retrieves a secret. works within bigquery python notebooks and needs
     testing in cloud functions
 
-    param: secret_name <string> the name of the secret in secrets manager, 
+    param: secret_name <string> the name of the secret in secrets manager,
         e.g. "apikey_coingecko_tentabs_free"
     param: version <string> the version of the secret to be loaded (only valid for notebooks)
     return: secret_value <string> the value of the secret
@@ -278,7 +278,7 @@ def translate_chain(
     return: chain_dict <dictionary> a dictionary with all available chain aliases
     '''
 
-    # retreive chain ids for all aliases
+    # retrieve chain ids for all aliases
     query_sql = '''
         select cn.chain_id
         ,cn.chain_reference
@@ -381,7 +381,7 @@ def coin_search_coingecko(
         coingecko_status_code = response.status_code
         response_data = json.loads(response.text)
         if verbose:
-            print(f'retreived new coingecko metadata for {coingecko_id}')
+            print(f'retrieved new coingecko metadata for {coingecko_id}')
 
     # parsing json data
     if coingecko_status_code == 200:
@@ -492,7 +492,7 @@ def convert_pool_to_token_address(
         if pool_response_code==200:
             response_data = json.loads(response.text)
             if verbose:
-                print(f'retreived new geckoterminal metadata for pool {pool_id}')
+                print(f'retrieved new geckoterminal metadata for pool {pool_id}')
             # if we were told to use the existing json but couldn't find it, upload the new response we retrieved
             if use_existing_json==True:
                 override_existing_json=True
@@ -883,7 +883,7 @@ def process_community_calls(cloud_event):
         ,'market_cap_url': str
         ,'chain': str
         ,'token_contract': str
-        ,'initial_mc': str             
+        ,'initial_mc': str
     }
     upload_df = calls_df_processed.astype(dtype_mapping)
 

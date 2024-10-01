@@ -3,7 +3,7 @@ provides updated whale chart data by following this sequence:
 1. updates the dune table net_transfers_state with the current state of the bigquery table \
     etl_pipelines.coin_wallet_net_transfers
 2. generates a dune query for all blockchains in need of updates and unions them together
-3. retreives the dune results and uploads them to bigquery
+3. retrieves the dune results and uploads them to bigquery
 
 '''
 import datetime
@@ -354,7 +354,7 @@ def generate_net_transfers_update_query(dune_chains):
 
 def get_fresh_dune_data(full_query):
     '''
-    runs the query in dune and retreives the results as a df. note that decimal adjustments have \
+    runs the query in dune and retrieves the results as a df. note that decimal adjustments have \
     not yet been applied so the dune query values are not the same order of magnitude as the \
     bigquery values. the query may take >10 minutes to run as it retrieves transfers from \
     multiple chains

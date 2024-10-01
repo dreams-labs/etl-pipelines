@@ -64,7 +64,7 @@ def update_geckoterminal_market_data(request):  # pylint: disable=unused-argumen
         if pair[3]is None:
             continue
 
-        # if market data is successfully retreived, append it
+        # if market data is successfully retrieved, append it
         market_df = retrieve_market_data_for_pool(pair)
         if not market_df.empty:
             all_market_data.append(market_df)
