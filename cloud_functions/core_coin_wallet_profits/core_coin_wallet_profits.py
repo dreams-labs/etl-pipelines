@@ -6,7 +6,6 @@ columns, int32, and dropping columns as soon as they are no longer needed.
 import time
 import gc
 import pandas as pd
-import numpy as np
 import functions_framework
 import pandas_gbq
 from dreams_core.googlecloud import GoogleCloud as dgc
@@ -426,11 +425,6 @@ def calculate_wallet_profitability(profits_df):
     profits_df['usd_inflows_cumulative'] = (
         profits_df.groupby(['coin_id', 'wallet_address'], observed=True)['usd_inflows']
         .cumsum()).astype('float32')
-    profits_df['total_return'] = (
-        profits_df['profits_cumulative']
-        / profits_df['usd_inflows_cumulative']
-        .where(profits_df['usd_inflows_cumulative'] != 0, np.nan)
-    ).astype('float32')
 
     # Final recategorization
     profits_df['coin_id'] = profits_df['coin_id'].astype('category')
@@ -463,7 +457,6 @@ def upload_profits_data(profits_df):
     profits_df['usd_net_transfers'] = profits_df['usd_net_transfers'].astype(float)
     profits_df['usd_inflows'] = profits_df['usd_inflows'].astype(float)
     profits_df['usd_inflows_cumulative'] = profits_df['usd_inflows_cumulative'].astype(float)
-    profits_df['total_return'] = profits_df['total_return'].astype(float)
 
     # Define the schema
     schema = [
@@ -476,7 +469,6 @@ def upload_profits_data(profits_df):
         {'name': 'usd_net_transfers', 'type': 'FLOAT'},
         {'name': 'usd_inflows', 'type': 'FLOAT'},
         {'name': 'usd_inflows_cumulative', 'type': 'FLOAT'},
-        {'name': 'total_return', 'type': 'FLOAT'}
     ]
 
     # upload df to BigQuery
