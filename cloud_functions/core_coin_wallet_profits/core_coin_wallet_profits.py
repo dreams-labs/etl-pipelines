@@ -5,7 +5,6 @@ columns, int32, and dropping columns as soon as they are no longer needed.
 """
 import time
 import gc
-import logging
 import pandas as pd
 import numpy as np
 import functions_framework
@@ -15,7 +14,6 @@ from dreams_core import core as dc
 
 # set up logger at the module level
 logger = dc.setup_logger()
-logger.setLevel(logging.DEBUG)
 
 
 @functions_framework.http
@@ -77,6 +75,9 @@ def retrieve_transfers_data():
             from `core.coin_market_data`
             group by 1
         ) cmd on cmd.coin_id = cwt.coin_id
+
+        where cwt.coin_id = '50b9b353-ed81-4751-ad1c-5d0dd6cb337f'
+        and cwt.wallet_address = '0xdbead774131d3c6baeaf9106342d1696ad686564'
         """
 
     # Run the SQL query using dgc's run_sql method
@@ -239,7 +240,7 @@ def prepare_profits_data(transfers_df, prices_df):
 
     # Group by coin_id and wallet_address to ensure only one record per pair
     pre_price_transfer_groups = (
-        pre_price_transfers.groupby(['coin_id', 'wallet_address'],observed=True)
+        pre_price_transfers.sort_values('date').groupby(['coin_id', 'wallet_address'],observed=True)
         .agg({
             'first_price_date': 'first',
             'balance': 'last',  # Get the balance as of the latest transfer before first_price_date
@@ -300,7 +301,7 @@ def prepare_profits_data(transfers_df, prices_df):
     # purchased and sold all coins in these pre-data eras, their first record will be of a
     # zero-balance state.
 
-    # calculate cumulative token inflows
+    # calculate cumulative token inflows (i.e. transfers above 0)
     profits_df['token_inflows'] = profits_df['net_transfers'].clip(lower=0)
     profits_df['token_inflows_cumulative'] = (
         profits_df.groupby(['coin_id', 'wallet_address'],observed=True)['token_inflows']
