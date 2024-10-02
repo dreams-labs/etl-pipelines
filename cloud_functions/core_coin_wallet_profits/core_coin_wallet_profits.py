@@ -75,9 +75,6 @@ def retrieve_transfers_data():
             from `core.coin_market_data`
             group by 1
         ) cmd on cmd.coin_id = cwt.coin_id
-
-        where cwt.coin_id = '50b9b353-ed81-4751-ad1c-5d0dd6cb337f'
-        and cwt.wallet_address = '0xdbead774131d3c6baeaf9106342d1696ad686564'
         """
 
     # Run the SQL query using dgc's run_sql method
