@@ -219,7 +219,7 @@ def prepare_profits_data(transfers_df, prices_df):
     # 2. Attach data showing the first price record of all coins
     # ----------------------------------------------------------
     # Identify the earliest pricing data for each coin and merge to get the first price date
-    first_prices_df = prices_df.groupby('coin_id',observed=True).agg({
+    first_prices_df = prices_df.sort_values('date').groupby('coin_id',observed=True).agg({
         'date': 'min',
         'price': 'first'  # Assuming we want the first available price on the first_price_date
     }).reset_index()
