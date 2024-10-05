@@ -77,7 +77,6 @@ def retrieve_geckoterminal_metadata(request):  # pylint: disable=unused-argument
         coin_id = row['coin_id']
 
         logger.info('Initiating geckoterminal metadata search for <%s:%s>', blockchain, address)
-
         # Pass the storage and bigquery clients to the search function
         geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, bigquery_client)
 
@@ -187,7 +186,11 @@ def ping_geckoterminal_api(blockchain, address, max_retries=3, retry_delay=30, i
 
     for attempt in range(max_retries):
         response = requests.get(url, timeout=30)
-        response_data = json.loads(response.text)
+        try:
+            response_data = json.loads(response.text)
+        except json.JSONDecodeError:
+            print(f"Received non-JSON response: {response.text}")
+            response_data = None
         status_code = response.status_code
 
         # Retry if rate limit is exceeded
