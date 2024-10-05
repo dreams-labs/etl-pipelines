@@ -2,7 +2,7 @@
 This module retrieves metadata for coins from Geckoterminal and stores the results in Google Cloud
 Storage (GCS) and BigQuery. It performs the following sequence of operations:
 
-1. retrieve_coingecko_metadata(request):
+1. retrieve_geckoterminal_metadata(request):
    - This is the entry point function, triggered via an HTTP request.
    - It queries BigQuery to retrieve a list of coins that need metadata from Geckoterminal.
    - For each coin in the list, it calls geckoterminal_metadata_search() to retrieve metadata
@@ -22,7 +22,7 @@ Storage (GCS) and BigQuery. It performs the following sequence of operations:
      geckoterminal_metadata_search().
 
 ### Flow Summary:
-The retrieve_coingecko_metadata() function starts by querying BigQuery for a list of coins that
+The retrieve_geckoterminal_metadata() function starts by querying BigQuery for a list of coins that
 require metadata. For each coin, it calls geckoterminal_metadata_search(), which in turn calls
 fetch_geckoterminal_data() to retrieve metadata from Geckoterminal. If successful, the metadata is
 stored in Google Cloud Storage, and the result (whether success, failure, or a rate-limiting event)
@@ -44,7 +44,7 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
-def retrieve_coingecko_metadata(request):  # pylint: disable=unused-argument  # noqa: F841
+def retrieve_geckoterminal_metadata(request):  # pylint: disable=unused-argument  # noqa: F841
     '''
     Queries BigQuery to obtain a list of coins that need metadata and attempts to match them and
     store metadata by calling geckoterminal_metadata_search() for each.

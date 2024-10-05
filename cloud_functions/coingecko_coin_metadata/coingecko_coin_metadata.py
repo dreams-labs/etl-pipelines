@@ -54,7 +54,7 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
         from core.coins cc
         join core.chains ch on ch.chain_id = cc.chain_id
         left join etl_pipelines.coin_coingecko_ids search_exclusions on search_exclusions.coin_id = cc.coin_id
-            and cgi.search_log in (
+            and search_exclusions.search_log in (
                 'search successful'
                 ,"{'error': 'coin not found'}"
                 ,"KeyError: ID not found in response data"
