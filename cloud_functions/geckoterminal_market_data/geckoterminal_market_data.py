@@ -80,6 +80,10 @@ def update_geckoterminal_market_data(request):  # pylint: disable=unused-argumen
     # ---------------------------------------------------------------------------
     new_market_data_df = filter_new_market_data(updates_df, combined_market_df)
 
+    # Filter out records for the current UTC date
+    current_utc_date = pd.Timestamp.now(tz='UTC').normalize()
+    new_market_data_df = new_market_data_df[new_market_data_df['date'] < current_utc_date]
+
     if not new_market_data_df.empty:
         upload_combined_market_df(new_market_data_df)
 
@@ -383,10 +387,6 @@ def upload_combined_market_df(combined_market_df):
         'volume': 'float',
         'updated_at': 'datetime64[ns, UTC]'
     }
-
-    # Filter out records for the current UTC date
-    current_utc_date = pd.Timestamp.now(tz='UTC').normalize()
-    combined_market_df = combined_market_df[combined_market_df['date'] < current_utc_date]
 
     # Set updated_at time
     updated_at = datetime.datetime.now(utc).strftime('%Y-%m-%d %H:%M:%S')

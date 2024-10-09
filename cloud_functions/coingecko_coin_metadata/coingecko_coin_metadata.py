@@ -35,10 +35,10 @@ logger = dc.setup_logger()
 
 @functions_framework.http
 def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # noqa: F841
-    '''
+    """
     Queries BigQuery to obtain a list of coins that need metadata and attempts to match them and
     store metadata by calling coingecko_metadata_search() for each.
-    '''
+    """
 
     # get GCP credentials
     credentials = dgc().credentials
@@ -47,28 +47,29 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
 
 
     # pull list of coins to attempt
-    query_sql = '''
+    query_sql = """
         select cc.coin_id
         ,ch.chain_text_coingecko
         ,cc.address
         from core.coins cc
         join core.chains ch on ch.chain_id = cc.chain_id
-        left join etl_pipelines.coin_coingecko_ids cgi on cgi.coin_id = cc.coin_id
-            and cgi.search_log in (
+        left join etl_pipelines.coin_coingecko_ids search_exclusions on search_exclusions.coin_id = cc.coin_id
+            and search_exclusions.search_log in (
                 'search successful'
                 ,"{'error': 'coin not found'}"
+                ,"KeyError: ID not found in response data"
             )
         left join etl_pipelines.coin_coingecko_metadata cgm on cgm.coingecko_id = cc.coingecko_id
         -- don't include coins without addresses
         where cc.address is not null
 
         -- don't reattempt addresses that couldn't be found
-        and cgi.coin_id is null
+        and search_exclusions.coin_id is null
 
         -- don't attempt coins that already have metadata
         and cgm.coingecko_id is null
         group by 1,2,3
-        '''
+        """
 
     update_queue_df = dgc().run_sql(query_sql)
     logger.info('coins to update: %s', str(update_queue_df.shape[0]))
@@ -97,7 +98,7 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
 
 
 def coingecko_metadata_search(blockchain, address, coin_id, bigquery_client, storage_client):
-    '''
+    """
     For a given blockchain and address, attempts to look up the coin on Coingecko by calling
     fetch_coingecko_data(). If the search is successful, stores the metadata in GCS.
 
@@ -106,7 +107,7 @@ def coingecko_metadata_search(blockchain, address, coin_id, bigquery_client, sto
     param: coin_id <dataframe> core.coins.coin_id which is added to bigquery records
     param: bigquery_client <dataframe> authenticated client for inserting rows to BigQuery
     param: storage_client <dataframe> authenticated client for uploading to GCS
-    '''
+    """
 
     # making the api call
     response_data = fetch_coingecko_data(blockchain, address)
@@ -160,7 +161,7 @@ def coingecko_metadata_search(blockchain, address, coin_id, bigquery_client, sto
 
 
 def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
-    '''
+    """
     Makes an API call to Coingecko and returns the response data.
     Retries the call if a rate limit error (429) is encountered.
 
@@ -169,7 +170,7 @@ def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
     param: max_retries <int> number of times to retry on 429 error
     param: retry_delay <int> delay in seconds between retries
     returns: response_data <dict> JSON response data from Coingecko API
-    '''
+    """
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
     headers = {'x_cg_pro_api_key': coingecko_api_key}
     url = f'https://api.coingecko.com/api/v3/coins/{blockchain}/contract/{address}'
