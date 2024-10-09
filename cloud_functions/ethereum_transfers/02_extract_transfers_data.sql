@@ -1,4 +1,4 @@
-CREATE OR REPLACE TABLE ethereum_transfers.transfers_cohort_1_2024_0925  -- needs to be changed
+CREATE TABLE ethereum_transfers.transfers_cohort_2_2020_and_earlier  -- needs to be changed
 PARTITION BY date
 CLUSTER BY token_address AS (
 
@@ -11,7 +11,8 @@ transfers_filtered AS (
     SELECT t.*
     FROM `bigquery-public-data.crypto_ethereum.token_transfers` t
     JOIN cohort_coins_list cl ON cl.address = LOWER(t.token_address)
-    WHERE CAST(block_timestamp AS DATE) BETWEEN '2024-01-01' AND '2024-09-25'  -- needs to be changed
+    WHERE CAST(block_timestamp AS DATE) <= '2020-12-31'  -- needs to be changed
+    -- WHERE CAST(block_timestamp AS DATE) BETWEEN '2024-01-01' AND '2024-10-07'  -- needs to be changed
 ),
 transfers AS (
     -- receipts (positive)
@@ -43,4 +44,3 @@ daily_net_transfers AS (
 SELECT *
 FROM daily_net_transfers
 )
-
