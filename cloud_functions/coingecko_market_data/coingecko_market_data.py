@@ -32,65 +32,73 @@ def update_coin_market_data_coingecko(request):  # pylint: disable=unused-argume
     # 1. retrieve list of coins with a coingecko_id that need market data updates
     updates_df = retrieve_updates_df()
     logger.info('retrieved bigquery for %s records with stale coingecko market data...',
-                str(updates_df.shape[0]))
+                len(updates_df))
 
     # 2. retrieve market data for each coin in need of updates
 
     all_market_data = []
+    batch_size = 3
+
+    # Initialize BigQuery client
+    client = bigquery.Client()
+
     for i in range(updates_df.shape[0]):
         try:
-            # coingecko free api limit is 30 calls per minute so pause 2 seconds.
-            # also prevents the cloud function from creating too many instances.
+            # Coingecko API limit: 30 calls per minute, so pause for 2 seconds.
             if i > 0:
                 time.sleep(2)
 
-            # store iteration-specific variables
+            # Store iteration-specific variables
             coingecko_id = updates_df['coingecko_id'][i]
 
-            # prepare pandas date series of existing records to filter to only new rows
-            dates_with_records = updates_df[updates_df['coingecko_id']==coingecko_id]['all_dates']
-            dates_with_records = pd.Series([date for date in dates_with_records.iloc[0]])
-            dates_with_records = pd.to_datetime(dates_with_records).dt.tz_localize('UTC')
+            # Prepare pandas date series of existing records to filter to only new rows
+            dates_with_records = updates_df[updates_df['coingecko_id'] == coingecko_id]['all_dates']
+            if not dates_with_records.empty:
+                dates_with_records = pd.Series([date for date in dates_with_records.iloc[0]])
+                dates_with_records = pd.to_datetime(dates_with_records).dt.tz_localize('UTC')
 
-            # retrieve coingecko market data
-            logger.info('retreiving coingecko data for %s...', coingecko_id)
-            market_df,api_status_code = retrieve_coingecko_market_data(coingecko_id)
+            # Retrieve Coingecko market data
+            logger.info('Retrieving coingecko data for %s...', coingecko_id)
+            api_market_df, api_status_code = retrieve_coingecko_market_data(coingecko_id)
+            log_market_data_search(client, coingecko_id, api_status_code, api_market_df)
 
             if api_status_code == 200:
-                if not market_df.empty:
-                    logger.info('successfully retrieved %s records for %s.'
-                                , str(market_df.shape[0]), coingecko_id)
+                if not api_market_df.empty:
+                    logger.info('Successfully retrieved %s records for %s.', len(api_market_df), coingecko_id)
 
-                    # format and filter market data to prepare for upload
-                    market_df = format_and_add_columns(market_df, coingecko_id, dates_with_records)
-                    all_market_data.append(market_df)
+                    # Format and filter market data to prepare for upload
+                    market_df = format_and_add_columns(api_market_df, coingecko_id, dates_with_records)
+
+                    # if there are new dates to upload, append to all_market_data
+                    if not market_df.empty:
+                        all_market_data.append(market_df)
 
                 else:
-                    logger.info('no new records found for %s.', coingecko_id)
+                    logger.info('No new records found for %s.', coingecko_id)
 
-            elif api_status_code == 404:
-                # blacklist ids that return 404 responses so we don't keep retrying them
-                blacklist_coingecko_id(coingecko_id)
+            # If modulo of batch_size is 0, we have reached a full batch
+            if (i + 1) % batch_size == 0:
+
+                if all_market_data:
+                    combined_market_df = pd.concat(all_market_data, ignore_index=True)
+                    logger.info('Uploading batch of market data...')
+                    upload_market_data(combined_market_df)
+                    all_market_data = []  # Clear the list after upload
 
         except requests.RequestException as req_err:
             logger.error('Network error while retrieving data for %s: %s', coingecko_id, req_err)
         except ValueError as val_err:
             logger.error('Data processing error for %s: %s', coingecko_id, val_err)
-        except Exception as e: # pylint: disable=W0718
-            logger.error('Unexpected error occurred for coingecko_id %s: %s', coingecko_id, str(e))
-            logger.debug('Stack trace: ', exc_info=True)
 
-            continue
-
-    # Combine all data into a single DataFrame and upload it at once
+    # Upload any remaining data after the loop ends
     if all_market_data:
         combined_market_df = pd.concat(all_market_data, ignore_index=True)
-        logger.info('uploading combined market data...')
+        logger.info('Uploading final batch of market data...')
         upload_market_data(combined_market_df)
 
     logger.info('update_coin_market_data_coingecko() completed successfully.')
 
-    return '{{"status":"200"}}'
+    return '{"status":"200"}'
 
 
 
@@ -106,27 +114,30 @@ def retrieve_updates_df():
     query_sql = '''
         with coingecko_data_status as (
             select cgi.coingecko_id
-            ,max(md.updated_at) as most_recent_record
-            ,count(md.updated_at)
+            ,max(sl.created_at) as most_recent_search
+            ,max(cmd.date) as most_recent_market_data
+            ,max(case when api_code = 404 then 1 else 0 end) as has_404_code
             from `core.coin_facts_coingecko` cgi
-            left join `etl_pipelines.coin_market_data_coingecko` md on md.coingecko_id = cgi.coingecko_id
-
-            -- filter to remove ids that result in 404 responses
-            left join `etl_pipelines.coingecko_ids_blacklist` bl on bl.coingecko_id = cgi.coingecko_id
-            where cgi.coingecko_id is not null
-            and bl.coingecko_id is null
+            left join `etl_pipelines.coin_market_data_coingecko` cmd on cmd.coingecko_id = cgi.coingecko_id
+            left join `etl_pipelines.coin_market_data_coingecko_search_logs` sl on sl.coingecko_id = cgi.coingecko_id
             group by 1
         )
 
         select cds.coingecko_id
-        ,cds.most_recent_record
+        ,cds.most_recent_search
         ,array_agg(cmd.date IGNORE NULLS order by cmd.date asc) as all_dates
         from coingecko_data_status cds
         left join `etl_pipelines.coin_market_data_coingecko` cmd on cmd.coingecko_id = cds.coingecko_id
         where (
-            cds.most_recent_record is null
-            or cds.most_recent_record < (current_date('UTC') - 2)
+            -- hasn't been searched in the last 2 days
+            (cds.most_recent_search is null
+            or cds.most_recent_search < (current_date('UTC') - 2))
+            AND
+            -- doesn't have market data from the last 2 days
+            ((cds.most_recent_market_data) < (current_date('UTC') - 2))
         )
+        -- has never had 404 code
+        and cds.has_404_code = 0
         group by 1,2
         '''
 
@@ -158,7 +169,7 @@ def retrieve_coingecko_market_data(coingecko_id):
             break
         elif api_status_code == 429:
             logger.info('coingecko api call timed out, retrying after a 60 second pause...')
-            time.sleep(60)
+
             continue
         else:
             logger.error('unexpected coingecko api status code %s for %s, continuing to next coin.',
@@ -266,7 +277,10 @@ def format_and_add_columns(df, coingecko_id, dates_with_records):
     df['date'] = pd.to_datetime(df['date']).dt.floor('D')
 
     # Filter out records that already exist in the database based on dates_with_records
+    full_row_count = len(df)
     df = df[~df['date'].isin(dates_with_records)]
+    logger.info(' %s/%s records for %s were new.',
+                len(df), full_row_count, coingecko_id)
 
     # drop duplicate dates if exists. this only occurs if a coin is removed from coingecko, e.g.:
     # https://www.coingecko.com/en/coins/serum-ser
@@ -381,29 +395,38 @@ def upload_market_data(market_df):
     logger.info('appended upload df to %s.', table_name)
 
 
-def blacklist_coingecko_id(coingecko_id: str):
+
+def log_market_data_search(client, coingecko_id, api_status_code, market_df):
     """
-    Blacklist a Coingecko ID by inserting it into the specified BigQuery table
-    when a 404 error is encountered.
+    Logs search outcome to BigQuery using streaming inserts.
+    This is used to avoid making duplicate requests to:
+        - inactive coins that return 404 responses
+        - coins with partial date coverage that appear to always need updates
+            based on their coin_market_data coverage
 
     Args:
         coingecko_id (str): The Coingecko ID to be blacklisted.
+        api_status_code (int): The API code from the request
+        market_df (pd.DataFrame): The df returned by the API
     Returns:
         None
     """
-    # Initialize BigQuery client
-    client = bigquery.Client()
-
     # Prepare the full table name
-    table_full_name = "western-verve-411004.etl_pipelines.coingecko_ids_blacklist"
+    table_full_name = "western-verve-411004.etl_pipelines.coin_market_data_coingecko_search_logs"
 
-    # Prepare the SQL query to insert the blacklisted coingecko_id
-    insert_blacklist_query = f"""
-        INSERT INTO `{table_full_name}` (coingecko_id, blacklisted_at, reason)
-        VALUES ('{coingecko_id}', CURRENT_TIMESTAMP(), '404 Not Found')
-    """
+    # Prepare the row data
+    row_to_insert = [
+        {
+            "coingecko_id": coingecko_id,
+            "api_code": api_status_code,
+            "records_returned": len(market_df),
+            "created_at": datetime.datetime.now(utc).strftime('%Y-%m-%d %H:%M:%S')
+        }
+    ]
 
-    # Run the query using the BigQuery client
-    client.query(insert_blacklist_query)
-
-    logger.info('Coingecko ID %s has been blacklisted due to 404 response.', coingecko_id)
+    # Use streaming insert to add the data
+    errors = client.insert_rows_json(table_full_name, row_to_insert)
+    if errors:
+        logger.error("Failed to log market data search outcome: %s", errors)
+    else:
+        logger.info("Logged market data search outcome for %s.", coingecko_id)
