@@ -55,7 +55,7 @@ def update_exclusions_table():
         'core_coin_wallet_transfers_exclusions!A:E')
 
     # format and upload df
-    df['created_date'] = pd.to_datetime(df['created_date'])
+    df['created_date'] = pd.to_datetime(df['created_date'], format='mixed').dt.tz_localize('UTC')
     df['updated_at'] = datetime.datetime.now(utc)
     dgc().upload_df_to_bigquery(
         df,
