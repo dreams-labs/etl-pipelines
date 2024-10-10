@@ -91,9 +91,13 @@ def update_dune_freshness_table():
             ) cap_size on cap_size.coin_id = c.coin_id
             left join existing_records e on e.token_address = c.address
                 and e.chain = ch.chain_text_dune
+            left join etl_pipelines.core_transfers_coin_exclusions coin_exclusions on coin_exclusions.coin_id = c.coin_id
+
+            -- remove coin exclusions
+            where coin_exclusions.coin_id is null
 
             -- all ethereum transfers are sourced from the public ethereum transfers table
-            where c.chain <> 'Ethereum'
+            and c.chain <> 'Ethereum'
 
             -- new coins don't have existing transfer data
             and e.token_address is null
