@@ -42,6 +42,16 @@ main:
             connector_params:
                 timeout: 3600
 
+    # these are turned off for now because there are no recurring additions to the tables that
+    # require rebuilding and they are expensive tables to rebuild
+    # - updateCoreWalletTables:
+    #     # pull prices and other market data from coingecko/geckoterminal for all matched coins
+    #     call: googleapis.workflowexecutions.v1.projects.locations.workflows.executions.run
+    #     args:
+    #         workflow_id: core-coin-wallet-tables
+    #         connector_params:
+    #             timeout: 3600
+
     - rebuildCoreCoins:
         # rebuild core.coins to reflect updated metadata
         call: http.get

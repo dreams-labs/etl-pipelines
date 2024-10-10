@@ -36,8 +36,12 @@ def freshen_coin_wallet_net_transfers(request):  # pylint: disable=W0613
     full_query = generate_net_transfers_update_query(update_chains)
 
     # retrieve the fresh dune data using the generated query
-    transfers_json = get_fresh_dune_data(full_query)
-    transfers_df = pd.DataFrame(transfers_json)
+    transfers_json_df = get_fresh_dune_data(full_query)
+
+    # convert the json column into a df
+    transfers_df, parse_errors_df = parse_transfers_json(transfers_json_df)
+    # expand the json data into df columns
+    logger.info('completed translation from dune export json to dataframe.')
 
     # upload the fresh dune data to bigquery
     append_to_bigquery_table(freshness_df,transfers_df)
@@ -67,6 +71,9 @@ def update_dune_freshness_table():
             ,max(date) as freshest_date
             from etl_pipelines.coin_wallet_net_transfers
             where data_source = 'dune'
+
+            -- all ethereum transfers are sourced from the public ethereum transfers table
+            and chain_text_source <> 'ethereum'
             group by 1,2,3
         )
         ,new_records as (
@@ -84,19 +91,29 @@ def update_dune_freshness_table():
             ) cap_size on cap_size.coin_id = c.coin_id
             left join existing_records e on e.token_address = c.address
                 and e.chain = ch.chain_text_dune
+            left join etl_pipelines.core_transfers_coin_exclusions coin_exclusions on coin_exclusions.coin_id = c.coin_id
+
+            -- remove coin exclusions
+            where coin_exclusions.coin_id is null
+
+            -- all ethereum transfers are sourced from the public ethereum transfers table
+            and c.chain <> 'Ethereum'
 
             -- new coins don't have existing transfer data
-            where e.token_address is null
+            and e.token_address is null
 
-             -- new coins must have dune-supported blockchains
+            -- new coins must have dune-supported blockchains
             and ch.chain_text_dune is not null
 
             -- new coins currently need decimal data to run the dune queries
             and c.decimals is not null
 
+            -- chain filter to help dune queries go faster by only querying one chain
+            and ch.chain_text_dune = 'solana'
+
             -- max market cap is used to prioritize smaller coins with lower credit cost
             order by cap_size.max_market_cap asc
-            limit 15
+            limit 20
         )
         select chain
         ,token_address
@@ -104,15 +121,18 @@ def update_dune_freshness_table():
         ,freshest_date
         ,current_timestamp() as updated_at
         from (
-            select * from existing_records
+            -- select * from existing_records
             -- union all
-            -- select * from new_records
+            select * from new_records
         )
 
-        -- do not update solana tokens with negative wallets per dune
+        -- all eth transfers are handled from bigquery public data
+        where chain <> 'ethereum'
+
+        -- do not update solana tokens with negative wallets per dune data
         -- source: https://dune.com/queries/4094516
         -- dune github ticket: https://github.com/duneanalytics/spellbook/issues/6690
-        where token_address not in (
+        and token_address not in (
             'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm'
             ,'25hAyBQfoDhfWx9ay6rarbgvWGwDdNqcHsXS3jQ3mTDJ'
             ,'FU1q8vJpZNUrmqsciSjp8bAKKidGsLmouB8CBdf8TKQv'
@@ -362,7 +382,7 @@ def get_fresh_dune_data(full_query):
     params:
         full_query (str): sql query to run
     returns:
-        transfers_json (json): json of token transfers without decimal calculations applied
+        transfers_json_df (json): raw dune query response containing one column with json objects
     '''
     dune = DuneClient.from_env()
 
@@ -384,11 +404,41 @@ def get_fresh_dune_data(full_query):
         )
     logger.info('fetched fresh dune data with %s rows.', len(transfers_json_df))
 
-    # expand the json data into df columns
-    transfers_json = [json.loads(record) for record in transfers_json_df['transfers_json']]
-    logger.info('completed translation from dune export json to dataframe.')
+    return transfers_json_df
 
-    return transfers_json
+
+
+def parse_transfers_json(transfers_json_df):
+    """
+    Parses the JSON data from the raw Dune response and converts it into a DataFrame.
+    Any records that fail to parse are logged and skipped.
+
+    Parameters:
+        transfers_json_df (DataFrame): DataFrame containing one column with JSON objects.
+
+    Returns:
+        DataFrame: A DataFrame with successfully parsed records.
+        DataFrame: A DataFrame with records that failed to parse, for further investigation.
+    """
+    parsed_records = []
+    failed_records = []
+
+    for index, record in enumerate(transfers_json_df['transfers_json']):
+        try:
+            parsed_record = json.loads(record)
+            parsed_records.append(parsed_record)
+        except json.JSONDecodeError as e:
+            logger.error("Failed to parse JSON at index %d: %s", index, e)
+            failed_records.append({'index': index, 'record': record, 'error': str(e)})
+
+    # Create DataFrames for successfully parsed records and failed records
+    parsed_df = pd.DataFrame(parsed_records)
+    failed_df = pd.DataFrame(failed_records)
+
+    logger.info("Parsed %d records successfully, %d records failed to parse.", len(parsed_df), len(failed_df))
+
+    return parsed_df, failed_df
+
 
 
 def append_to_bigquery_table(freshness_df,transfers_df):
