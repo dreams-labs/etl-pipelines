@@ -5,13 +5,14 @@ CLUSTER BY token_address AS (
 WITH cohort_coins_list AS (
     SELECT LOWER(address) AS address
     FROM etl_pipelines.ethereum_transfers_cohorts
+    WHERE cohort_number = 2                                          -- needs to be changed
     GROUP BY 1
 ),
 transfers_filtered AS (
     SELECT t.*
     FROM `bigquery-public-data.crypto_ethereum.token_transfers` t
     JOIN cohort_coins_list cl ON cl.address = LOWER(t.token_address)
-    WHERE CAST(block_timestamp AS DATE) <= '2020-12-31'  -- needs to be changed
+    WHERE CAST(block_timestamp AS DATE) <= '2020-12-31'              -- needs to be changed
     -- WHERE CAST(block_timestamp AS DATE) BETWEEN '2024-01-01' AND '2024-10-07'  -- needs to be changed
 ),
 transfers AS (
