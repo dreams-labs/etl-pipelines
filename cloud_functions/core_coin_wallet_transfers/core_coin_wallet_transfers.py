@@ -15,12 +15,12 @@ logger = dc.setup_logger()
 @functions_framework.http
 def update_core_coin_wallet_transfers(request):  # pylint: disable=W0613
     '''
-    runs all functions in sequence to refresh core.coin_market_data
+    runs all functions in sequence to refresh core.coin_wallet_transfers
     '''
     # update list of addresses to be excluded from the core table
     update_exclusions_table()
 
-    # insert new coingecko market data records to core.coin_market_data
+    # rebuild core table
     logger.info('rebuilding table core.coin_wallet_transfers...')
     counts_df = rebuild_core_coin_wallet_transfers()
 
@@ -68,8 +68,8 @@ def update_exclusions_table():
 
 def rebuild_core_coin_wallet_transfers():
     '''
-    adds new records in etl_pipelines.coin_market_data_coingecko to core.coin_market_data after
-    normalizing and filling relevant fields
+    rebuilds core.coin_wallet_transfers based on the current records in both the dune transfers table
+    and the ethereum_net_transfers table.
 
     returns:
         counts_df <df>: dataframe showing the number of rows in the core and etl transfers tables
