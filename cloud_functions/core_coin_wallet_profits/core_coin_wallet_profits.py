@@ -491,7 +491,8 @@ def upload_profits_data(profits_df):
         destination_table=destination_table,
         project_id=project_id,
         if_exists='replace',
-        table_schema=schema
+        table_schema=schema,
+        chunksize=5000000
     )
     logger.info("Upload to core.coin_wallet_profits complete after %.2f seconds",
                 time.time() - start_time)
