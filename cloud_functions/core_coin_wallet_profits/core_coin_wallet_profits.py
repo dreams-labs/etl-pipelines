@@ -393,7 +393,8 @@ def calculate_wallet_profitability(profits_df):
     profits_df['profits_change'] = (
         (profits_df['price'] - profits_df['previous_price'])
         * profits_df['previous_balance']
-    ).astype('float32')
+    )
+    profits_df = dc.safe_downcast(profits_df,'profits_change','float32')
 
     # Drop helper columns to preserve memory
     profits_df.drop(columns=['previous_price', 'previous_balance'], inplace=True)
@@ -401,38 +402,39 @@ def calculate_wallet_profitability(profits_df):
     # Calculate cumulative profits
     profits_df['profits_cumulative'] = (
         profits_df.groupby(['coin_id', 'wallet_address'], observed=True)['profits_change']
-        .cumsum()).astype('float32')
+        .cumsum())
+    profits_df = dc.safe_downcast(profits_df,'profits_cumulative','float32')
+
+    # Reconvert to category
     profits_df['coin_id'] = profits_df['coin_id'].astype('category')
 
     logger.info("Calculate profitability: %.2f seconds", time.time() - step_time)
     step_time = time.time()
 
     # Calculate USD inflows, balances, and rate of return
-    profits_df['usd_balance'] = (
-        (profits_df['balance'] * profits_df['price'])
-        .astype('float32')
-    )
-    profits_df['usd_net_transfers'] = (
-        (profits_df['net_transfers'] * profits_df['price'])
-        .astype('float32')
-    )
+    profits_df['usd_balance'] = profits_df['balance'] * profits_df['price']
+    profits_df = dc.safe_downcast(profits_df,'usd_balance','float32')
+
+    profits_df['usd_net_transfers'] = profits_df['net_transfers'] * profits_df['price']
+    profits_df = dc.safe_downcast(profits_df,'usd_net_transfers','float32')
 
     # Drop price and token-denominated columns to preserve memory
     profits_df.drop(columns=['price', 'balance', 'net_transfers'], inplace=True)
 
     # Calculate usd inflows metrics
-    profits_df['usd_inflows'] = (
-        profits_df['usd_net_transfers']
-        .where(profits_df['usd_net_transfers'] > 0, 0)
-    ).astype('float32')
+    profits_df['usd_inflows'] = (profits_df['usd_net_transfers']
+                                 .where(profits_df['usd_net_transfers'] > 0, 0))
+    profits_df = dc.safe_downcast(profits_df,'usd_inflows','float32')
+
     profits_df['usd_inflows_cumulative'] = (
         profits_df.groupby(['coin_id', 'wallet_address'], observed=True)['usd_inflows']
-        .cumsum()).astype('float32')
-    profits_df['total_return'] = (
-        profits_df['profits_cumulative']
-        / profits_df['usd_inflows_cumulative']
-        .where(profits_df['usd_inflows_cumulative'] != 0, np.nan)
-    ).astype('float32')
+        .cumsum())
+    profits_df = dc.safe_downcast(profits_df,'usd_inflows_cumulative','float32')
+
+    profits_df['total_return'] = (profits_df['profits_cumulative']
+                                  / profits_df['usd_inflows_cumulative']
+                                  .where(profits_df['usd_inflows_cumulative'] != 0, np.nan))
+    profits_df = dc.safe_downcast(profits_df,'total_return','float32')
 
     # Final recategorization
     profits_df['coin_id'] = profits_df['coin_id'].astype('category')
