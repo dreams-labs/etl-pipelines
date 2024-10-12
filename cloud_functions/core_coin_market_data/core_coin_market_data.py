@@ -23,8 +23,11 @@ def update_coin_market_data(request): # pylint: disable=unused-argument  # noqa:
     # retrieve the unadjusted data from the coingecko and geckoterminal etl_pipelines tables
     market_data_df = retrieve_raw_market_data()
 
+    # Remove single-day dips of 80% or more that fully recover the next day
+    market_data_cleaned = remove_single_day_dips(market_data_df)
+
     # fill empty records, leaving a 'days_imputed' column to make data lineage clear
-    market_data_filled_df = fill_market_data_gaps(market_data_df)
+    market_data_filled_df = fill_market_data_gaps(market_data_cleaned)
 
     # upload the filled data to bigquery
     upload_market_data_filled(market_data_filled_df)
@@ -125,6 +128,48 @@ def retrieve_raw_market_data():
                 round(time.time() - start_time))
 
     return market_data_df
+
+
+
+def remove_single_day_dips(df, price_col='price', dip_threshold=0.8, recovery_threshold=0.9):
+    """
+    Removes rows from the DataFrame that represent single-day dips in price data.
+
+    Parameters:
+    - df: DataFrame containing the price data
+    - price_col: Name of the column containing price data (default: 'price')
+    - dip_threshold: Threshold for identifying a significant dip (default: 0.8, i.e., 80% drop)
+    - recovery_threshold: Threshold for identifying recovery (default: 0.9, i.e., 90% recovery)
+
+    Returns:
+    - DataFrame with single-day dip rows removed
+    """
+    # Sort the DataFrame by coin_id and date
+    df = df.sort_values(['coin_id', 'date'])
+
+    # Calculate previous and next day prices
+    df['prev_price'] = df.groupby('coin_id', observed=True)[price_col].shift(1)
+    df['next_price'] = df.groupby('coin_id', observed=True)[price_col].shift(-1)
+
+    # Identify single-day dips
+    dip_mask = (
+        (df[price_col] / df['prev_price'] < dip_threshold) &
+        (df['next_price'] / df['prev_price'] > recovery_threshold)
+    )
+
+    # Count the number of dips removed
+    num_dips_removed = dip_mask.sum()
+
+    # Remove the rows identified as single-day dips
+    df_cleaned = df[~dip_mask].copy()
+
+    # Log the number of dips removed
+    logger.info("Removed %s single-day dips from the market data.", num_dips_removed)
+
+    # Drop the temporary columns used for calculations
+    df_cleaned = df_cleaned.drop(['prev_price', 'next_price'], axis=1)
+
+    return df_cleaned
 
 
 
