@@ -357,3 +357,89 @@ def test_fill_market_data_gaps_non_consecutive(sample_market_data_non_consecutiv
     # Check that updated_at is NaT for imputed days
     imputed_days = result_df[result_df['days_imputed'] > 0]
     assert imputed_days['updated_at'].isna().all()
+
+
+
+@pytest.fixture
+def sample_data_with_dips():
+    """
+    Fixture to create a sample DataFrame with clear single-day dips for multiple coins.
+    The dips are now set to represent an 80% drop and 90% recovery.
+
+    Returns:
+    - pd.DataFrame: Sample market data with single-day dips
+    """
+    data = {
+        'coin_id': ['btc', 'btc', 'btc', 'btc', 'btc', 'eth', 'eth', 'eth', 'eth', 'eth'],
+        'date': pd.to_datetime(['2023-01-01', '2023-01-02', '2023-01-03', '2023-01-04', '2023-01-05',
+                                '2023-01-01', '2023-01-02', '2023-01-03', '2023-01-04', '2023-01-05']),
+        'price': [100, 15, 95, 110, 115,  # BTC with a dip on day 2 (80% drop, 95% recovery)
+                  200, 210, 40, 195, 230],  # ETH with a dip on day 3 (81% drop, 93% recovery)
+        'market_cap': [10000, 2000, 9500, 11000, 11500,
+                       20000, 21000, 4000, 19500, 23000],
+        'fdv': [12000, 2400, 11400, 13200, 13800,
+                24000, 25200, 4800, 23400, 27600],
+        'volume': [1000, 1500, 1200, 1100, 1300,
+                   2000, 2100, 2500, 2200, 2300],
+        'circulating_supply': [100, 100, 100, 100, 100,
+                               100, 100, 100, 100, 100],
+        'total_supply': [120, 120, 120, 120, 120,
+                         120, 120, 120, 120, 120]
+    }
+    return pd.DataFrame(data)
+
+@pytest.mark.unit
+def test_remove_single_day_dips_normal_scenario(sample_data_with_dips):
+    """
+    Test the remove_single_day_dips function with a dataset containing clear single-day dips.
+
+    This test ensures that:
+    1. Single-day dips are correctly identified and removed
+    2. The resulting DataFrame has the correct number of rows
+    3. The dip rows are no longer present in the result
+    4. Non-dip rows remain unchanged
+
+    Args:
+    - sample_data_with_dips: Fixture providing sample data with single-day dips
+    """
+    # Call the function
+    result_df = cmd.remove_single_day_dips(sample_data_with_dips, dip_threshold=0.2, recovery_threshold=0.9)
+
+    # 1. Check that the correct number of rows were removed (2 dips)
+    assert len(result_df) == len(sample_data_with_dips) - 2
+
+    # 2. Check that the dip rows are removed
+    # For BTC: Day 2 (2023-01-02) should be removed
+    assert not any((result_df['coin_id'] == 'btc') & (result_df['date'] == '2023-01-02'))
+
+    # For ETH: Day 3 (2023-01-03) should be removed
+    assert not any((result_df['coin_id'] == 'eth') & (result_df['date'] == '2023-01-03'))
+
+    # 3. Check that non-dip rows remain unchanged
+    btc_non_dip = result_df[result_df['coin_id'] == 'btc']
+    eth_non_dip = result_df[result_df['coin_id'] == 'eth']
+
+    assert np.array_equal(btc_non_dip['price'].values, [100, 95, 110, 115])
+    assert np.array_equal(eth_non_dip['price'].values, [200, 210, 195, 230])
+
+    # 4. Check that other columns for non-dip rows are unchanged
+    for col in ['market_cap', 'fdv', 'volume', 'circulating_supply', 'total_supply']:
+        assert np.array_equal(
+            btc_non_dip[col].values,
+            sample_data_with_dips[(sample_data_with_dips['coin_id'] == 'btc') &
+                                    (sample_data_with_dips['date'] != '2023-01-02')][col].values
+        )
+        assert np.array_equal(
+            eth_non_dip[col].values,
+            sample_data_with_dips[(sample_data_with_dips['coin_id'] == 'eth') &
+                                    (sample_data_with_dips['date'] != '2023-01-03')][col].values
+        )
+
+    # 5. Check that the function logs the correct number of removed dips
+    # Note: This assumes that the function uses a logger. If it doesn't, you can remove this assertion.
+    # You might need to use a mocking library to capture the log output for this assertion.
+    # assert "Removed 2 single-day dips from the market data." in caplog.text
+
+    # 6. Check that 'prev_price' and 'next_price' columns are not in the result
+    assert 'prev_price' not in result_df.columns
+    assert 'next_price' not in result_df.columns
