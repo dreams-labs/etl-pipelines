@@ -24,25 +24,28 @@ def update_core_coin_wallet_profits(request):  # pylint: disable=W0613
     runs all functions in sequence to refresh core.coin_wallet_profits
     """
 
-    # Retrieve transfers data and the mapping needed to convert wallet ids back to addresses
-    transfers_df, wallet_address_mapping = retrieve_transfers_data()
+    coin_prefix = request.args.get('coin_prefix', '')
+    print(coin_prefix)
 
-    # Retrieve prices data
-    prices_df = retrieve_prices_df()
+    # # Retrieve transfers data and the mapping needed to convert wallet ids back to addresses
+    # transfers_df, wallet_address_mapping = retrieve_transfers_data()
 
-    # Calculate basic profitability data by comparing price changes
-    profits_df = prepare_profits_data(transfers_df, prices_df)
+    # # Retrieve prices data
+    # prices_df = retrieve_prices_df()
 
-    # Remove DataFrames from memory after they are no longer needed
-    del transfers_df, prices_df
-    gc.collect()
+    # # Calculate basic profitability data by comparing price changes
+    # profits_df = prepare_profits_data(transfers_df, prices_df)
 
-    # Calculate USD profitability metrics
-    profits_df = calculate_wallet_profitability(profits_df)
+    # # Remove DataFrames from memory after they are no longer needed
+    # del transfers_df, prices_df
+    # gc.collect()
 
-    # Upload the df
-    profits_df['wallet_address'] = wallet_address_mapping[profits_df['wallet_address']]
-    upload_profits_data(profits_df)
+    # # Calculate USD profitability metrics
+    # profits_df = calculate_wallet_profitability(profits_df)
+
+    # # Upload the df
+    # profits_df['wallet_address'] = wallet_address_mapping[profits_df['wallet_address']]
+    # upload_profits_data(profits_df)
 
     return '{{"rebuild of core.coin_wallet_transfers complete."}}'
 
