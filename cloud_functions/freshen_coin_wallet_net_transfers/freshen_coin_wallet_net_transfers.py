@@ -42,6 +42,8 @@ def freshen_coin_wallet_net_transfers(request):  # pylint: disable=W0613
     transfers_df, parse_errors_df = parse_transfers_json(transfers_json_df)
     # expand the json data into df columns
     logger.info('completed translation from dune export json to dataframe.')
+    if not parse_errors_df.empty:
+        logger.info("JSON parse errors occurred for %s records. ", len(parse_errors_df))
 
     # upload the fresh dune data to bigquery
     append_to_bigquery_table(freshness_df,transfers_df)
@@ -109,11 +111,11 @@ def update_dune_freshness_table():
             and c.decimals is not null
 
             -- chain filter to help dune queries go faster by only querying one chain
-            and ch.chain_text_dune = 'solana'
+            and ch.chain_text_dune = 'bnb'
 
             -- max market cap is used to prioritize smaller coins with lower credit cost
             order by cap_size.max_market_cap asc
-            limit 20
+            -- limit 20
         )
         select chain
         ,token_address
@@ -143,6 +145,24 @@ def update_dune_freshness_table():
             ,'BSHanq7NmdY6j8u5YE9A3SUygj1bhavFqb73vadspkL3'
             ,'DcUoGUeNTLhhzyrcz49LE7z3MEFwca2N9uSw1xbVi1gm'
             ,'5LafQUrVco6o7KMz42eqVEJ9LW31StPyGjeeu5sKoMtA'
+        )
+        and token_address in (
+            '0x77d547256a2cd95f32f67ae0313e450ac200648d'
+            ,'0x529c79f6918665ebe250f32eeeaa1d410a0798c6'
+            ,'0x30842a9c941d9de3af582c41ad12b11d776ba69e'
+            ,'0x8899ec96ed8c96b5c86c23c3f069c3def75b6d97'
+            ,'0x5f78f4bfcb2b43bc174fe16a69a13945cefa2978'
+            ,'0x6f51a1674befdd77f7ab1246b83adb9f13613762'
+            ,'0xaa9e582e5751d703f85912903bacaddfed26484c'
+            ,'0x19ae49b9f38dd836317363839a5f6bfbfa7e319a'
+            ,'0x9ec02756a559700d8d9e79ece56809f7bcc5dc27'
+            ,'0xa73164db271931cf952cbaeff9e8f5817b42fa5c'
+            ,'0xbb2826ab03b6321e170f0558804f2b6488c98775'
+            ,'0x617cab4aaae1f8dfb3ee138698330776a1e1b324'
+            ,'0xd06716e1ff2e492cc5034c2e81805562dd3b45fa'
+            ,'0xd6fdde76b8c1c45b33790cc8751d5b88984c44ec'
+            ,'0xcc6f1e1b87cfcbe9221808d2d85c501aab0b5192'
+            ,'0x818835503f55283cd51a4399f595e295a9338753'
         )
     '''
     freshness_df = dgc().run_sql(query_sql)

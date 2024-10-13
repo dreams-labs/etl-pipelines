@@ -213,6 +213,7 @@ def rebuild_core_coin_wallet_transfers():
                 -- token exclusions
                 left join etl_pipelines.ethereum_transfers_exclusions coin_exclusions_eth on coin_exclusions_eth.coin_id = t.coin_id
                 left join etl_pipelines.core_transfers_coin_exclusions coin_exclusions on coin_exclusions.coin_id = t.coin_id
+                left join etl_pipelines.stables_and_wraps_exclusions coin_exclusions_stables on coin_exclusions_stables.coin_id = t.coin_id
 
                 -- removes self custody contract transactions
                 where t.token_address <> t.wallet_address
@@ -223,6 +224,7 @@ def rebuild_core_coin_wallet_transfers():
                 -- remove coin exclusions
                 and coin_exclusions_eth.coin_id is null
                 and coin_exclusions.coin_id is null
+                and coin_exclusions_stables.coin_id is null
             ),
 
             negative_wallets as (
