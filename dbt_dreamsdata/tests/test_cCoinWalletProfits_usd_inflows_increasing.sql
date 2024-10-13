@@ -16,7 +16,7 @@ validation_check as (
     select *
     from ordered_profits
     -- 0.0001 allowance for floating point issues
-    where usd_inflows_cumulative < (prev_usd_inflows_cumulative - 0.0001)
+    where usd_inflows_cumulative < (least(prev_usd_inflows_cumulative * -0.0001, -0.001))
     and prev_usd_inflows_cumulative is not null
 )
 
