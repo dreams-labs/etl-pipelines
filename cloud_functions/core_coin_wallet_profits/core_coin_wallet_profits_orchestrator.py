@@ -14,10 +14,16 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
-def update_core_coin_wallet_profits(request):  # pylint: disable=W0613
+def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0613
     """
     runs all functions in sequence to refresh core.coin_wallet_profits
+
+    Params:
+    - request (flask.request): optionally should include the number of coins to be calculated
+        in each batch through the 'batch_size' param
     """
+    logger.info("Beginning rebuild sequence for core.coin_wallet_profits...")
+
     # 1. Assign coins to batches, with each batch including {batch_size} coins
     batch_size = request.args.get('batch_size', 100)
     batch_count = set_coin_batches(batch_size)
@@ -82,6 +88,8 @@ def set_coin_batches(batch_size):
     # Run the SQL query using dgc's run_sql method
     batch_count_df = dgc().run_sql(query_sql)
     batch_count = batch_count_df['total_batches'][0]
+
+    logger.info("Assigned coins to batches of %s in temp.temp_coin_batches.", batch_size)
 
     return batch_count
 
