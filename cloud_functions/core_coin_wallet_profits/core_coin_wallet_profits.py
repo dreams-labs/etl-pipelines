@@ -40,7 +40,7 @@ def update_core_coin_wallet_profits(batch_number=None):  # pylint: disable=W0613
     profits_df['wallet_address'] = wallet_address_mapping[profits_df['wallet_address']]
     upload_profits_data(profits_df)
 
-    return '{{"rebuild of core.coin_wallet_transfers complete."}}'
+    return '{{"profits_df upload successful."}}'
 
 
 
