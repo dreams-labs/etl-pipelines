@@ -5,7 +5,6 @@ columns, int32, and dropping columns as soon as they are no longer needed.
 """
 import time
 import gc
-import logging
 import pandas as pd
 import numpy as np
 import functions_framework
@@ -15,45 +14,45 @@ from dreams_core import core as dc
 
 # set up logger at the module level
 logger = dc.setup_logger()
-logger.setLevel(logging.DEBUG)
-
 
 @functions_framework.http
-def update_core_coin_wallet_profits(request):  # pylint: disable=W0613
+def update_core_coin_wallet_profits(batch_number=None):  # pylint: disable=W0613
     """
     runs all functions in sequence to refresh core.coin_wallet_profits
     """
+    # Retrieve transfers data and the mapping needed to convert wallet ids back to addresses
+    transfers_df, wallet_address_mapping = retrieve_transfers_data(batch_number)
 
-    coin_prefix = request.args.get('coin_prefix', '')
-    print(coin_prefix)
+    # Retrieve prices data
+    prices_df = retrieve_prices_df()
 
-    # # Retrieve transfers data and the mapping needed to convert wallet ids back to addresses
-    # transfers_df, wallet_address_mapping = retrieve_transfers_data()
+    # Calculate basic profitability data by comparing price changes
+    profits_df = prepare_profits_data(transfers_df, prices_df)
 
-    # # Retrieve prices data
-    # prices_df = retrieve_prices_df()
+    # Remove DataFrames from memory after they are no longer needed
+    del transfers_df, prices_df
+    gc.collect()
 
-    # # Calculate basic profitability data by comparing price changes
-    # profits_df = prepare_profits_data(transfers_df, prices_df)
+    # Calculate USD profitability metrics
+    profits_df = calculate_wallet_profitability(profits_df)
 
-    # # Remove DataFrames from memory after they are no longer needed
-    # del transfers_df, prices_df
-    # gc.collect()
-
-    # # Calculate USD profitability metrics
-    # profits_df = calculate_wallet_profitability(profits_df)
-
-    # # Upload the df
-    # profits_df['wallet_address'] = wallet_address_mapping[profits_df['wallet_address']]
-    # upload_profits_data(profits_df)
+    # Upload the df
+    profits_df['wallet_address'] = wallet_address_mapping[profits_df['wallet_address']]
+    upload_profits_data(profits_df)
 
     return '{{"rebuild of core.coin_wallet_transfers complete."}}'
 
 
-def retrieve_transfers_data():
+
+def retrieve_transfers_data(batch_number=None):
     """
     Retrieves market data from the core.coin_wallet_transfers table and converts columns to
-    memory-efficient formats.
+    memory-efficient formats. If a batch number is provided, the transfers data is limited
+    to only the coin_ids associated with the batch_number in temp.temp_coin_batches table.
+
+    Parameters:
+    - batch_number (int): the batch number in the temp.temp_coin_batches table specifying
+        which coins to process
 
     Returns:
     - transfers_df (DataFrame): df containing transfers data
@@ -64,9 +63,18 @@ def retrieve_transfers_data():
     start_time = time.time()
     logger.info('Retrieving transfers data...')
 
+    # Generate SQL to limit coins to only specified batch if applicable
+    batch_sql = ""
+    if batch_number is not None:
+        logger.info('Generating transfers query for coin_id batch %s...', batch_number)
+
+        batch_sql = f"""
+        join temp.temp_coin_batches b on b.coin_id = cwt.coin_id
+        and b.batch_number = {batch_number}
+        """
 
     # SQL query to retrieve transfers data
-    query_sql = """
+    query_sql = f"""
         select cwt.coin_id
         ,cwt.wallet_address
         ,cwt.date
@@ -80,7 +88,10 @@ def retrieve_transfers_data():
             from `core.coin_market_data`
             group by 1
         ) cmd on cmd.coin_id = cwt.coin_id
+
+        {batch_sql}
         """
+
 
     # Run the SQL query using dgc's run_sql method
     transfers_df = dgc().run_sql(query_sql)
@@ -106,9 +117,13 @@ def retrieve_transfers_data():
 
 
 
-def retrieve_prices_df():
+def retrieve_prices_df(batch_number=None):
     """
     Retrieves market data from the core.coin_market_data table and converts coin_id to categorical
+
+    Parameters:
+    - batch_number (int): the batch number in the temp.temp_coin_batches table specifying
+        which coins to process
 
     Returns:
     - prices_df: DataFrame containing market data with 'coin_id' as a categorical column.
@@ -117,12 +132,21 @@ def retrieve_prices_df():
     start_time = time.time()
     logger.info('Retrieving market data...')
 
+    # Generate SQL to limit coins to only specified batch if applicable
+    batch_sql = ""
+    if batch_number is not None:
+        batch_sql = f"""
+        join temp.temp_coin_batches b on b.coin_id = cmd.coin_id
+        and b.batch_number = {batch_number}
+        """
+
     # SQL query to retrieve market data
-    query_sql = """
+    query_sql = f"""
         select cmd.coin_id
         ,date
         ,cast(cmd.price as float64) as price
         from core.coin_market_data cmd
+        {batch_sql}
         order by 1,2
     """
 
@@ -449,16 +473,25 @@ def calculate_wallet_profitability(profits_df):
 
 
 
-def upload_profits_data(profits_df):
+def upload_profits_data(profits_df,batch_number=None):
     """
-    Uploads profits dataframe to the core.coin_wallet_profits table
+    Uploads profits dataframe to either the core.coin_wallet_profits table if there is
+    no batch_number provided, or to a temp table based on the batch_number if it is.
 
     Parameters:
-        profits_df (DataFrame): The DataFrame containing the profits data to upload.
+    - profits_df (DataFrame): The DataFrame containing the profits data to upload.
+    - batch_number (int): the batch number in the temp.temp_coin_batches table specifying
+        which coins to process
     """
+    if batch_number is None:
+        destination_table = 'core.coin_wallet_profits'
+    else:
+        destination_table = f'temp.coin_wallet_profits_batch_{batch_number}'
+
+    logger.info('Uploading profits_df with shape (%s) to %s...',
+                profits_df.shape, destination_table)
+
     start_time = time.time()
-    logger.info('Uploading profits_df with dimensions %s...'
-                , profits_df.shape)
 
     # Apply explicit typecasts
     profits_df['date'] = pd.to_datetime(profits_df['date'])
@@ -486,16 +519,26 @@ def upload_profits_data(profits_df):
         {'name': 'total_return', 'type': 'FLOAT'}
     ]
 
-    # upload df to BigQuery
+    # Upload df to BigQuery
     project_id = 'western-verve-411004'
-    destination_table = 'core.coin_wallet_profits'
     pandas_gbq.to_gbq(
         profits_df,
         destination_table=destination_table,
         project_id=project_id,
         if_exists='replace',
-        table_schema=schema,
-        chunksize=5000000
+        table_schema=schema
     )
-    logger.info("Upload to core.coin_wallet_profits complete after %.2f seconds",
+    logger.info("Upload to %s complete after %.2f seconds",
+                destination_table,
                 time.time() - start_time)
+
+    # Log batch updates to temp table if applicable
+    if batch_number is not None:
+        log_batch_sql = f"""
+            update temp.temp_coin_batches
+            set batch_table = '{destination_table}'
+            where batch_number = {batch_number}
+            """
+
+        _ = dgc().run_sql(log_batch_sql)
+        logger.info("Updated temp.temp_coin_batches for batch %s.", batch_number)

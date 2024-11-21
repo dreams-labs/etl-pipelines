@@ -15,8 +15,6 @@ from dreams_core import core as dc
 
 # set up logger at the module level
 logger = dc.setup_logger()
-logger.setLevel(logging.DEBUG)
-
 
 # @functions_framework.http
 # def update_core_coin_wallet_profits(request):  # pylint: disable=W0613
@@ -64,7 +62,9 @@ def set_coin_batches(batch_size):
         )
         SELECT
         coin_id,
-        CAST(FLOOR((row_num - 1) / {batch_size}) AS INT64) AS batch_number
+        CAST(FLOOR((row_num - 1) / {batch_size}) AS INT64) AS batch_number,
+        current_datetime() as batching_date,
+        CAST(NULL AS STRING) as batch_table
         FROM
         numbered_coins
         ORDER BY
