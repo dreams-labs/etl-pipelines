@@ -24,7 +24,7 @@ def update_core_coin_wallet_profits(batch_number=None):  # pylint: disable=W0613
     transfers_df, wallet_address_mapping = retrieve_transfers_data(batch_number)
 
     # Retrieve prices data
-    prices_df = retrieve_prices_df()
+    prices_df = retrieve_prices_df(batch_number)
 
     # Calculate basic profitability data by comparing price changes
     profits_df = prepare_profits_data(transfers_df, prices_df)
@@ -38,7 +38,7 @@ def update_core_coin_wallet_profits(batch_number=None):  # pylint: disable=W0613
 
     # Upload the df
     profits_df['wallet_address'] = wallet_address_mapping[profits_df['wallet_address']]
-    upload_profits_data(profits_df)
+    upload_profits_data(profits_df, batch_number)
 
     return '{{"profits_df upload successful."}}'
 
