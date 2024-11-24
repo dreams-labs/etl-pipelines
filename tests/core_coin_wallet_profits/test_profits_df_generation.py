@@ -3,6 +3,7 @@ tests used to audit the files in the etl-pipelines repository
 """
 # pylint: disable=W1203 # fstrings in logs
 # pylint: disable=C0301 # line over 100 chars
+# pylint: disable=C0302 # file over 1000 lines
 # pylint: disable=E0401 # can't find import (due to local import)
 # pylint: disable=C0413 # import not at top of doc (due to local import)
 # pylint: disable=W0612 # unused variables (due to test reusing functions with 2 outputs)
