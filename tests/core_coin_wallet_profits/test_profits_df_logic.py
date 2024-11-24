@@ -19,6 +19,12 @@ from dotenv import load_dotenv
 from dreams_core import core as dc
 
 # Project Modules
+from test_profits_df_generation import (
+    pipeline_result_df,
+    sample_transfers_df,
+    sample_prices_df
+)
+
 # pyright: reportMissingImports=false
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../cloud_functions/core_coin_wallet_profits')))
 import core_coin_wallet_profits as cwp
@@ -491,3 +497,569 @@ def test_calculate_wallet_profitability_edge_cases(caplog):
     for col in numeric_cols:
         assert not np.any(np.isinf(result_df[col])), f"Found infinity in {col}"
         assert not np.any(np.isnan(result_df[col])), f"Found NaN in {col}"
+
+
+
+
+
+
+
+# ======================================================== #
+#                                                          #
+#            I N T E G R A T I O N   T E S T S             #
+#                                                          #
+# ======================================================== #
+
+@pytest.mark.integration
+def test_wallet1_coin1_profitability(pipeline_result_df, caplog):
+    """
+    Tests profitability calculations for Wallet1 Coin1 from the pipeline result which has:
+    1. Early activity before prices (Jan 1-2) resulting in imputed record
+    2. Price transitions: 1.0 -> 1.1 -> 1.2 -> 1.15 -> 1.25
+    3. Balance transitions: 120.0 -> 140.0 -> 100.0 -> 100.0 -> 110.0
+
+    The test filters the pipeline result for Wallet1 Coin1 and verifies:
+    1. Daily profit calculations based on price changes and previous balances
+    2. Cumulative profit tracking through the sequence
+    3. USD value calculations for balances and transfers
+    4. Total return calculations based on cumulative profits and inflows
+    """
+    caplog.set_level(logging.WARNING)
+
+    # Filter pipeline result for Wallet1 Coin1
+    wallet1_coin1_df = pipeline_result_df[
+        (pipeline_result_df['wallet_address'] == 'wallet1') &
+        (pipeline_result_df['coin_id'] == 'coin1')
+    ].sort_values('date').copy()
+
+    # Execute profitability calculation
+    result_df = cwp.calculate_wallet_profitability(wallet1_coin1_df)
+
+    # Verify profits_change
+    expected_profits_change = [
+        0.0,    # First day with price
+        12.0,   # (1.1 - 1.0) * 120.0
+        14.0,   # (1.2 - 1.1) * 140.0
+        -5.0,   # (1.15 - 1.2) * 100.0
+        10.0    # (1.25 - 1.15) * 100.0
+    ]
+    assert np.allclose(
+        result_df['profits_change'],
+        expected_profits_change,
+        equal_nan=True
+    ), "Daily profit calculations incorrect"
+
+    # Verify cumulative profits
+    expected_profits_cumulative = [0.0, 12.0, 26.0, 21.0, 31.0]
+    assert np.allclose(
+        result_df['profits_cumulative'],
+        expected_profits_cumulative,
+        equal_nan=True
+    ), "Cumulative profit tracking incorrect"
+
+    # Verify USD balances
+    expected_usd_balance = [
+        120.0,         # 120.0 * 1.0
+        154.0,         # 140.0 * 1.1
+        120.0,         # 100.0 * 1.2
+        115.0,         # 100.0 * 1.15
+        137.5          # 110.0 * 1.25
+    ]
+    assert np.allclose(
+        result_df['usd_balance'],
+        expected_usd_balance,
+        equal_nan=True
+    ), "USD balance calculations incorrect"
+
+    # Verify USD inflows (positive transfers * price)
+    expected_usd_inflows = [
+        120.0,         # Initial imputed balance * first price
+        22.0,          # 20.0 * 1.1
+        0.0,           # Outflow
+        0.0,           # No activity
+        12.5           # 10.0 * 1.25
+    ]
+    assert np.allclose(
+        result_df['usd_inflows'],
+        expected_usd_inflows,
+        equal_nan=True
+    ), "USD inflow calculations incorrect"
+
+    # Verify cumulative USD inflows
+    expected_usd_inflows_cumulative = [120.0, 142.0, 142.0, 142.0, 154.5]
+    assert np.allclose(
+        result_df['usd_inflows_cumulative'],
+        expected_usd_inflows_cumulative,
+        equal_nan=True
+    ), "Cumulative USD inflow tracking incorrect"
+
+    # Verify total return (profits_cumulative / cumulative_inflows)
+    expected_total_return = [
+        0.0,             # 0.0 / 120.0
+        0.0845,          # 12.0 / 142.0
+        0.1831,          # 26.0 / 142.0
+        0.1479,          # 21.0 / 142.0
+        0.2006           # 31.0 / 154.5
+    ]
+    assert np.allclose(
+        result_df['total_return'],
+        expected_total_return,
+        rtol=1e-3,
+        equal_nan=True
+    ), "Total return calculations incorrect"
+
+
+@pytest.mark.integration
+def test_wallet1_coin2_profitability(pipeline_result_df, caplog):
+    """
+    Tests profitability calculations for Wallet1 Coin2 which has:
+    1. Later start with first activity on Jan 5
+    2. Volatile price pattern: 2.0 -> 1.8 -> 2.2 -> 1.9
+    3. Clean transfer pattern without pre-price activity
+    4. All activity occurs after price data exists
+
+    The test verifies:
+    1. Proper handling of price volatility in profit calculations
+    2. Correct USD value tracking during price swings
+    3. Profit impacts of transfers during volatile price periods
+    4. Return calculations with simpler transfer pattern
+    """
+    caplog.set_level(logging.WARNING)
+
+    # Filter pipeline result for Wallet1 Coin2
+    wallet1_coin2_df = pipeline_result_df[
+        (pipeline_result_df['wallet_address'] == 'wallet1') &
+        (pipeline_result_df['coin_id'] == 'coin2')
+    ].sort_values('date').copy()
+
+    # Execute profitability calculation
+    result_df = cwp.calculate_wallet_profitability(wallet1_coin2_df)
+
+    # Verify profits_change
+    expected_profits_change = [
+        0.0,    # First day with balance
+        80.0,   # (2.2 - 1.8) * 200.0
+        -45.0   # (1.9 - 2.2) * 150.0
+    ]
+    assert np.allclose(
+        result_df['profits_change'],
+        expected_profits_change,
+        equal_nan=True
+    ), "Daily profit calculations incorrect"
+
+    # Verify cumulative profits
+    expected_profits_cumulative = [0.0, 80.0, 35.0]
+    assert np.allclose(
+        result_df['profits_cumulative'],
+        expected_profits_cumulative,
+        equal_nan=True
+    ), "Cumulative profit tracking incorrect"
+
+    # Verify USD balances
+    expected_usd_balance = [
+        360.0,         # 200.0 * 1.8
+        330.0,         # 150.0 * 2.2
+        332.5          # 175.0 * 1.9
+    ]
+    assert np.allclose(
+        result_df['usd_balance'],
+        expected_usd_balance,
+        equal_nan=True
+    ), "USD balance calculations incorrect"
+
+    # Verify USD inflows (only positive transfers * price)
+    expected_usd_inflows = [
+        360.0,         # 200.0 * 1.8
+        0.0,           # -50.0 transfer
+        47.5           # 25.0 * 1.9
+    ]
+    assert np.allclose(
+        result_df['usd_inflows'],
+        expected_usd_inflows,
+        equal_nan=True
+    ), "USD inflow calculations incorrect"
+
+    # Verify cumulative USD inflows
+    expected_usd_inflows_cumulative = [360.0, 360.0, 407.5]
+    assert np.allclose(
+        result_df['usd_inflows_cumulative'],
+        expected_usd_inflows_cumulative,
+        equal_nan=True
+    ), "Cumulative USD inflow tracking incorrect"
+
+    # Verify total return
+    expected_total_return = [
+        0.0,             # 0.0 / 360.0
+        0.2222,          # 80.0 / 360.0
+        0.0859           # 35.0 / 407.5
+    ]
+    assert np.allclose(
+        result_df['total_return'],
+        expected_total_return,
+        rtol=1e-3,
+        equal_nan=True
+    ), "Total return calculations incorrect"
+
+
+@pytest.mark.integration
+def test_wallet2_coin1_profitability(pipeline_result_df, caplog):
+    """
+    Tests profitability calculations for Wallet2 Coin1 which has:
+    1. Early transfer on Jan 1 (150.0) leading to imputed record on Jan 3
+    2. Gap between early transfer and subsequent activity
+    3. Price sequence: 1.0 -> 1.1 -> 1.2
+    4. Mixed transfer pattern (-50.0, +25.0) after price data exists
+    """
+    caplog.set_level(logging.WARNING)
+
+    # Filter pipeline result for Wallet2 Coin1
+    wallet2_coin1_df = pipeline_result_df[
+        (pipeline_result_df['wallet_address'] == 'wallet2') &
+        (pipeline_result_df['coin_id'] == 'coin1')
+    ].sort_values('date').copy()
+
+    # Debug print to see what data we actually have
+    print("\nActual data from fixture:")
+    print(wallet2_coin1_df[['date', 'balance', 'price', 'net_transfers']].to_string())
+
+    # Execute profitability calculation
+    result_df = cwp.calculate_wallet_profitability(wallet2_coin1_df)
+
+    # Debug print to see calculation results
+    print("\nCalculation results:")
+    print(result_df.to_string())
+
+    # Verify profits_change
+    expected_profits_change = [
+        0.0,    # First day (imputed)
+        15.0,   # (1.1 - 1.0) * 150.0
+        10.0    # (1.2 - 1.1) * 100.0
+    ]
+    assert np.allclose(
+        result_df['profits_change'],
+        expected_profits_change,
+        equal_nan=True
+    ), "Daily profit calculations incorrect"
+
+    # Verify cumulative profits
+    expected_profits_cumulative = [0.0, 15.0, 25.0]
+    assert np.allclose(
+        result_df['profits_cumulative'],
+        expected_profits_cumulative,
+        equal_nan=True
+    ), "Cumulative profit tracking incorrect"
+
+    # Verify USD balances
+    expected_usd_balance = [
+        150.0,         # 150.0 * 1.0 (imputed)
+        110.0,         # 100.0 * 1.1
+        150.0          # 125.0 * 1.2
+    ]
+    assert np.allclose(
+        result_df['usd_balance'],
+        expected_usd_balance,
+        equal_nan=True
+    ), "USD balance calculations incorrect"
+
+    # Verify USD inflows (positive transfers * price)
+    expected_usd_inflows = [
+        150.0,         # 150.0 * 1.0 (imputed)
+        0.0,           # -50.0 transfer
+        30.0           # 25.0 * 1.2
+    ]
+    assert np.allclose(
+        result_df['usd_inflows'],
+        expected_usd_inflows,
+        equal_nan=True
+    ), "USD inflow calculations incorrect"
+
+    # Verify cumulative USD inflows
+    expected_usd_inflows_cumulative = [150.0, 150.0, 180.0]
+    assert np.allclose(
+        result_df['usd_inflows_cumulative'],
+        expected_usd_inflows_cumulative,
+        equal_nan=True
+    ), "Cumulative USD inflow tracking incorrect"
+
+    # Verify total return
+    expected_total_return = [
+        0.0,             # 0.0 / 150.0
+        0.1000,          # 15.0 / 150.0
+        0.1389           # 25.0 / 180.0
+    ]
+    assert np.allclose(
+        result_df['total_return'],
+        expected_total_return,
+        rtol=1e-3,
+        equal_nan=True
+    ), "Total return calculations incorrect"
+
+@pytest.mark.integration
+def test_wallet2_coin2_profitability(pipeline_result_df, caplog):
+    """
+    Tests profitability calculations for Wallet2 Coin2 which has:
+    1. Complete exit and re-entry pattern
+    2. Volatile price sequence: 2.0 -> 1.8 -> 2.2 -> 1.9
+    3. Balance goes to zero then returns
+    4. Multiple inflows at different price points
+
+    The test verifies:
+    1. Proper handling of complete exit (zero balance period)
+    2. Correct profit calculations through re-entry
+    3. USD value tracking during volatile price period
+    4. Return calculations with exit/re-entry pattern
+    """
+    caplog.set_level(logging.WARNING)
+
+    # Filter pipeline result for Wallet2 Coin2
+    wallet2_coin2_df = pipeline_result_df[
+        (pipeline_result_df['wallet_address'] == 'wallet2') &
+        (pipeline_result_df['coin_id'] == 'coin2')
+    ].sort_values('date').copy()
+
+    # Debug print to see what data we actually have
+    print("\nActual data from fixture:")
+    print(wallet2_coin2_df[['date', 'balance', 'price', 'net_transfers']].to_string())
+
+    # Execute profitability calculation
+    result_df = cwp.calculate_wallet_profitability(wallet2_coin2_df)
+
+    # Debug print to see calculation results
+    print("\nCalculation results:")
+    print(result_df.to_string())
+
+    # Verify profits_change
+    expected_profits_change = [
+        0.0,    # First day
+        -20.0,  # (1.8 - 2.0) * 100.0
+        60.0,   # (2.2 - 1.8) * 150.0
+        0.0,    # Zero previous balance, so no profit change
+    ]
+    assert np.allclose(
+        result_df['profits_change'],
+        expected_profits_change,
+        equal_nan=True
+    ), "Daily profit calculations incorrect"
+
+    # Verify cumulative profits
+    expected_profits_cumulative = [0.0, -20.0, 40.0, 40.0]
+    assert np.allclose(
+        result_df['profits_cumulative'],
+        expected_profits_cumulative,
+        equal_nan=True
+    ), "Cumulative profit tracking incorrect"
+
+    # Verify USD balances
+    expected_usd_balance = [
+        200.0,         # 100.0 * 2.0
+        270.0,         # 150.0 * 1.8
+        0.0,           # 0.0 * 2.2
+        142.5          # 75.0 * 1.9
+    ]
+    assert np.allclose(
+        result_df['usd_balance'],
+        expected_usd_balance,
+        equal_nan=True
+    ), "USD balance calculations incorrect"
+
+    # Verify USD inflows (positive transfers * price)
+    expected_usd_inflows = [
+        200.0,         # 100.0 * 2.0
+        90.0,          # 50.0 * 1.8
+        0.0,           # -150.0 transfer
+        142.5          # 75.0 * 1.9
+    ]
+    assert np.allclose(
+        result_df['usd_inflows'],
+        expected_usd_inflows,
+        equal_nan=True
+    ), "USD inflow calculations incorrect"
+
+    # Verify cumulative USD inflows
+    expected_usd_inflows_cumulative = [200.0, 290.0, 290.0, 432.5]
+    assert np.allclose(
+        result_df['usd_inflows_cumulative'],
+        expected_usd_inflows_cumulative,
+        equal_nan=True
+    ), "Cumulative USD inflow tracking incorrect"
+
+    # Verify total return
+    expected_total_return = [
+        0.0,             # 0.0 / 200.0
+        -0.0690,         # -20.0 / 290.0
+        0.1379,          # 40.0 / 290.0
+        0.0925           # 40.0 / 432.5
+    ]
+    assert np.allclose(
+        result_df['total_return'],
+        expected_total_return,
+        rtol=1e-3,
+        equal_nan=True
+    ), "Total return calculations incorrect"
+
+@pytest.mark.integration
+def test_wallet3_coin1_profitability(pipeline_result_df, caplog):
+    """
+    Tests profitability calculations for Wallet3 Coin1 which has:
+    1. Only a single real transfer after offsetting day
+    2. Jan 4 has offsetting transfers (should not create record)
+    3. Jan 5: Single +50.0 transfer @ 1.2
+    4. No pre-price activity or imputed records
+
+    The test verifies:
+    1. No record exists for offsetting transfer day
+    2. Proper profit calculations with single positive transfer
+    3. USD value tracking with clean transfer pattern
+    4. Return calculations with single inflow
+    """
+    caplog.set_level(logging.WARNING)
+
+    # Filter pipeline result for Wallet3 Coin1
+    wallet3_coin1_df = pipeline_result_df[
+        (pipeline_result_df['wallet_address'] == 'wallet3') &
+        (pipeline_result_df['coin_id'] == 'coin1')
+    ].sort_values('date').copy()
+
+    # Debug print to see what data we actually have
+    print("\nActual data from fixture:")
+    print(wallet3_coin1_df[['date', 'balance', 'price', 'net_transfers']].to_string())
+
+    # Execute profitability calculation
+    result_df = cwp.calculate_wallet_profitability(wallet3_coin1_df)
+
+    # Debug print to see calculation results
+    print("\nCalculation results:")
+    print(result_df.to_string())
+
+    # Verify only one record exists (Jan 5)
+    assert len(result_df) == 1, "Should only have one record (Jan 5)"
+    assert result_df['date'].iloc[0] == pd.to_datetime('2024-01-05'), \
+        "Only record should be for Jan 5"
+
+    # Verify profits_change
+    expected_profits_change = [0.0]  # First day with actual balance
+    assert np.allclose(
+        result_df['profits_change'],
+        expected_profits_change,
+        equal_nan=True
+    ), "Daily profit calculations incorrect"
+
+    # Verify cumulative profits
+    expected_profits_cumulative = [0.0]
+    assert np.allclose(
+        result_df['profits_cumulative'],
+        expected_profits_cumulative,
+        equal_nan=True
+    ), "Cumulative profit tracking incorrect"
+
+    # Verify USD balances
+    expected_usd_balance = [60.0]  # 50.0 * 1.2
+    assert np.allclose(
+        result_df['usd_balance'],
+        expected_usd_balance,
+        equal_nan=True
+    ), "USD balance calculations incorrect"
+
+    # Verify USD inflows
+    expected_usd_inflows = [60.0]  # 50.0 * 1.2
+    assert np.allclose(
+        result_df['usd_inflows'],
+        expected_usd_inflows,
+        equal_nan=True
+    ), "USD inflow calculations incorrect"
+
+    # Verify cumulative USD inflows
+    expected_usd_inflows_cumulative = [60.0]
+    assert np.allclose(
+        result_df['usd_inflows_cumulative'],
+        expected_usd_inflows_cumulative,
+        equal_nan=True
+    ), "Cumulative USD inflow tracking incorrect"
+
+    # Verify total return
+    expected_total_return = [0.0]  # 0.0 / 60.0
+    assert np.allclose(
+        result_df['total_return'],
+        expected_total_return,
+        rtol=1e-3,
+        equal_nan=True
+    ), "Total return calculations incorrect"
+
+
+@pytest.mark.integration
+def test_wallet3_coin3_profitability(pipeline_result_df, caplog):
+    """
+    Tests profitability calculations for Wallet3 Coin3 which has:
+    1. Early activity (Jan 3: +50.0) before first price data
+    2. First price on Jan 5 @ 3.0 with imputed record
+    3. Extreme price volatility (3.0 -> 4.5 -> 2.5)
+    4. Mixed transfer pattern after price data exists
+
+    The test verifies:
+    1. Proper handling of pre-price activity with imputed record
+    2. Correct profit calculations through extreme price movements
+    3. USD value calculations during high volatility
+    4. Return calculations with early inflow and later activity
+    """
+    caplog.set_level(logging.WARNING)
+
+    # Filter pipeline result for Wallet3 Coin3
+    wallet3_coin3_df = pipeline_result_df[
+        (pipeline_result_df['wallet_address'] == 'wallet3') &
+        (pipeline_result_df['coin_id'] == 'coin3')
+    ].sort_values('date').copy()
+
+    # Execute profitability calculation
+    result_df = cwp.calculate_wallet_profitability(wallet3_coin3_df)
+
+    # Verify profits_change
+    expected_profits_change = [
+        0.0,     # First day (imputed)
+        75.0,    # (4.5 - 3.0) * 50.0
+        -160.0   # (2.5 - 4.5) * 80.0
+    ]
+    assert np.allclose(
+        result_df['profits_change'],
+        expected_profits_change,
+        equal_nan=True
+    ), "Daily profit calculations incorrect"
+
+    # Verify cumulative profits
+    expected_profits_cumulative = [0.0, 75.0, -85.0]
+    assert np.allclose(
+        result_df['profits_cumulative'],
+        expected_profits_cumulative,
+        equal_nan=True
+    ), "Cumulative profit tracking incorrect"
+
+    # Verify USD balances
+    expected_usd_balance = [
+        150.0,    # 50.0 * 3.0 (imputed)
+        360.0,    # 80.0 * 4.5
+        175.0     # 70.0 * 2.5
+    ]
+    assert np.allclose(
+        result_df['usd_balance'],
+        expected_usd_balance,
+        equal_nan=True
+    ), "USD balance calculations incorrect"
+
+    # Verify USD inflows (positive transfers * price)
+    expected_usd_inflows = [
+        150.0,    # 50.0 * 3.0 (imputed)
+        135.0,    # 30.0 * 4.5
+        0.0       # -10.0 transfer
+    ]
+    assert np.allclose(
+        result_df['usd_inflows'],
+        expected_usd_inflows,
+        equal_nan=True
+    ), "USD inflow calculations incorrect"
+
+    # Verify cumulative USD inflows
+    expected_usd_inflows_cumulative = [150.0, 285.0, 285.0]
+    assert np.allclose(
+        result_df['usd_inflows_cumulative'],
+        expected_usd_inflows_cumulative,
+        equal_nan=True
+    ), "Cumulative USD inflow tracking incorrect"
