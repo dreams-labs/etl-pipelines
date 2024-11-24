@@ -32,7 +32,7 @@ def update_core_coin_wallet_profits(batch_number=None):  # pylint: disable=W0613
     gc.collect()
 
     # Append new records to accomodate transfer history without price data
-    profits_df = add_first_price_info(profits_df)
+    profits_df = add_first_price_info(profits_df,prices_df)
     imputed_records = create_imputed_records(profits_df)
     profits_df = append_imputed_records(profits_df, imputed_records)
     profits_df = filter_pre_inflow_records(profits_df)
@@ -255,30 +255,37 @@ def merge_prices_and_transfers(transfers_df, prices_df):
 
 
 
-def add_first_price_info(profits_df):
+def add_first_price_info(profits_df, prices_df):
     """
     Adds first_price_date and first_price columns for each coin in the dataset.
     These columns indicate when price data becomes available for each coin.
 
     Parameters:
     - profits_df (pd.DataFrame): Merged transfers and prices with coin_id, date, and price
+    - prices_df (pd.DataFrame): Original price data with coin_id, date, and price columns
 
     Returns
     - profits_df (pd.DataFrame): Input df with first_price_date and first_price columns added
     """
     if profits_df.empty:
         raise ValueError("Input DataFrame cannot be empty")
+    if prices_df.empty:
+        raise ValueError("Prices DataFrame cannot be empty")
 
     df = profits_df.copy()
 
-    # Get first non-null price date and value for each coin
-    first_prices = (df[df['price'].notna()]
+    # Get first price date and value for each coin directly from prices_df
+    first_prices = (prices_df
                    .groupby('coin_id', observed=True)
                    .agg({'date': 'min', 'price': 'first'})
                    .reset_index()
                    .rename(columns={'date': 'first_price_date', 'price': 'first_price'}))
 
-    return df.merge(first_prices, on='coin_id', how='left')
+    # Append price columns and set coin_id to categorical
+    profits_df = df.merge(first_prices, on='coin_id', how='left')
+    profits_df['coin_id'] = profits_df['coin_id'].astype('category')
+
+    return profits_df
 
 
 
@@ -364,6 +371,9 @@ def append_imputed_records(profits_df, imputed_records):
 
     # Update net_transfers to match balance for these records
     result_df.loc[earliest_idx, 'net_transfers'] = result_df.loc[earliest_idx, 'balance']
+
+    # Reset coin_id to categorical
+    result_df['coin_id'] = result_df['coin_id'].astype('category')
 
     return result_df.reset_index(drop=True)
 
