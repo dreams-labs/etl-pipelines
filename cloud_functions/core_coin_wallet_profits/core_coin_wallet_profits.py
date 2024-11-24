@@ -324,43 +324,73 @@ def create_imputed_records(profits_df):
     if profits_df.empty:
         return pd.DataFrame(columns=profits_df.columns)
 
-    # Group by coin and wallet to assess each combination independently
-    groups = profits_df.groupby(['coin_id', 'wallet_address'], observed=True)
+    # Identify the coin-wallet pairs that need imputed records
+    pre_price_transfers = (profits_df[
+        profits_df['date']<profits_df['first_price_date']]
+        )
+    has_pre_price_transfers = pre_price_transfers[['coin_id','wallet_address']].drop_duplicates()
 
-    imputation_needed = []
-    for _, group_df in groups:
-        # Check conditions for this specific wallet-coin combination
-        has_transfers_before_prices = not group_df[
-            group_df['date'] < group_df['first_price_date']].empty
-        no_activity_on_first_price_date = group_df[
-            group_df['date'] == group_df['first_price_date']].empty
+    has_activity_on_first_price_date = (profits_df[
+        profits_df['date']==profits_df['first_price_date']][['coin_id','wallet_address']]
+        .drop_duplicates())
 
-        if has_transfers_before_prices and no_activity_on_first_price_date:
-            # Get the latest pre-price balance for this wallet-coin
-            pre_price_balance = (
-                group_df[group_df['date'] < group_df['first_price_date']]
-                .sort_values('date')
-                .iloc[-1]
-            )
-            imputation_needed.append(pre_price_balance)
+    # Filter to only the coin-wallet pairs that need imputed records
+    needs_imputation = (
+        has_pre_price_transfers.merge(
+            has_activity_on_first_price_date,
+            on=['coin_id', 'wallet_address'],
+            how='left',
+            indicator=True
+        )
+    )
+    needs_imputation = needs_imputation[needs_imputation['_merge'] == 'left_only']
+    needs_imputation = needs_imputation.drop(columns=['_merge'])
 
-    if not imputation_needed:
-        return pd.DataFrame(columns=profits_df.columns)
+    # Identify and append the wallet balances prior to the first price
+    pre_price_balances = pre_price_transfers.merge(
+        needs_imputation,
+        on=['coin_id','wallet_address'],
+        how='inner'
+    )
+    pre_price_balances = pre_price_balances.groupby(['coin_id','wallet_address'], observed=True)['balance'].last()
 
-    # Create imputed records for all wallets needing them
-    imputed_records = pd.DataFrame(imputation_needed)
+    needs_imputation = (
+        needs_imputation
+        .merge(
+            pre_price_balances,
+            on=['coin_id','wallet_address'],
+            how='inner'
+        )
+    )
 
-    # Set up the imputed records with carried forward balance as transfer
-    imputed_records['coin_id'] = imputed_records['coin_id'].astype('category')
-    imputed_records['date'] = imputed_records['first_price_date']
-    imputed_records['net_transfers'] = imputed_records['balance']
-    imputed_records['price'] = imputed_records['first_price']
+    # Identify and append the first available price data of the coin
+    first_prices_df = profits_df[['coin_id','first_price_date','first_price']].drop_duplicates()
+
+    needs_imputation = (
+        needs_imputation
+        .merge(
+            first_prices_df,
+            on=['coin_id'],
+            how='inner'
+        )
+    )
+
+    # Combine all datasets into a df that matches profits_df structure
+    imputed_records = pd.DataFrame()
+    imputed_records['coin_id'] = needs_imputation['coin_id']
+    imputed_records['date'] = pd.to_datetime(needs_imputation['first_price_date'])
+    imputed_records['wallet_address'] = needs_imputation['wallet_address']
+    imputed_records['net_transfers'] = needs_imputation['balance']
+    imputed_records['balance'] = needs_imputation['balance']
+    imputed_records['price'] = needs_imputation['first_price']
+    imputed_records['first_price_date'] = pd.to_datetime(needs_imputation['first_price_date'])
+    imputed_records['first_price'] = needs_imputation['first_price']
+
 
     logger.info("Row imputation complete: %.2f seconds",
                  time.time() - start_time)
 
-    # Return only the columns from the input DataFrame
-    return imputed_records[profits_df.columns]
+    return imputed_records
 
 
 
