@@ -11,7 +11,6 @@ tests used to audit the files in the etl-pipelines repository
 
 import sys
 import os
-import logging
 import pandas as pd
 import numpy as np
 import pytest
