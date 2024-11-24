@@ -20,29 +20,44 @@ def update_core_coin_wallet_profits(batch_number=None):  # pylint: disable=W0613
     """
     runs all functions in sequence to refresh core.coin_wallet_profits
     """
-    # Retrieve transfers data and the mapping needed to convert wallet ids back to addresses
-    transfers_df, wallet_address_mapping = retrieve_transfers_data(batch_number)
+    start_time = time.time()
 
-    # Retrieve prices data
+    # Retrieve transfers and prices data
+    transfers_df, wallet_address_mapping = retrieve_transfers_data(batch_number)
     prices_df = retrieve_prices_df(batch_number)
+    logger.info('<1> Retrieved transfers and prices data  (%.2f seconds).',
+                time.time() - start_time)
+    step_time = time.time()
 
     # Calculate basic profitability data from transfers and prices, then clear memory
     profits_df = merge_prices_and_transfers(transfers_df, prices_df)
-    del transfers_df, prices_df
+    profits_df = add_first_price_info(profits_df,prices_df)
+    del transfers_df,prices_df
     gc.collect()
+    logger.info('<2> Merged transfers and prices data after (%.2f seconds).',
+                time.time() - step_time)
+    step_time = time.time()
 
     # Append new records to accomodate transfer history without price data
-    profits_df = add_first_price_info(profits_df,prices_df)
     imputed_records = create_imputed_records(profits_df)
     profits_df = append_imputed_records(profits_df, imputed_records)
     profits_df = filter_pre_inflow_records(profits_df)
+    logger.info('<3> Imputed and filtered records to align wallet and price timing (%.2f seconds).',
+                time.time() - step_time)
+    step_time = time.time()
 
     # Calculate USD profitability metrics
     profits_df = calculate_wallet_profitability(profits_df)
+    logger.info('<4> Calculated wallet proftability (%.2f seconds).',
+                time.time() - step_time)
+    step_time = time.time()
+
 
     # Upload the df
     profits_df['wallet_address'] = wallet_address_mapping[profits_df['wallet_address']]
     upload_profits_data(profits_df, batch_number)
+    logger.info('<5> Uploaded profits data.  (%.2f seconds).',
+                time.time() - step_time)
 
     return '{{"profits_df upload successful."}}'
 
@@ -303,6 +318,9 @@ def create_imputed_records(profits_df):
     Returns:
     - imputed_records_df (pd.DataFrame): New records to be added, with same schema as input df
     """
+    start_time = time.time()
+    logger.info('Generating imputed rows for profits_df...')
+
     if profits_df.empty:
         return pd.DataFrame(columns=profits_df.columns)
 
@@ -338,6 +356,9 @@ def create_imputed_records(profits_df):
     imputed_records['net_transfers'] = imputed_records['balance']
     imputed_records['price'] = imputed_records['first_price']
 
+    logger.info("Row imputation complete: %.2f seconds",
+                 time.time() - start_time)
+
     # Return only the columns from the input DataFrame
     return imputed_records[profits_df.columns]
 
@@ -355,6 +376,9 @@ def append_imputed_records(profits_df, imputed_records):
     Returns:
     - combined_df (pd.DataFrame): DataFrame with correct transfer records from price data start
     """
+    start_time = time.time()
+    logger.info('Appending imputed rows to profits_df...')
+
     if profits_df.empty:
         return profits_df
 
@@ -375,6 +399,10 @@ def append_imputed_records(profits_df, imputed_records):
     # Reset coin_id to categorical
     result_df['coin_id'] = result_df['coin_id'].astype('category')
 
+    logger.info("Finished appending imputed records: %.2f seconds",
+                 time.time() - start_time)
+
+
     return result_df.reset_index(drop=True)
 
 
@@ -391,6 +419,9 @@ def filter_pre_inflow_records(profits_df):
     Returns:
     - filtered_df (pd.DataFrame): DataFrame with only post-inflow records
     """
+    start_time = time.time()
+    logger.info('Filtering missing data and formatting profits_df...')
+
     if profits_df.empty:
         return profits_df
 
@@ -413,6 +444,9 @@ def filter_pre_inflow_records(profits_df):
         'token_inflows',
         'token_inflows_cumulative'
     ])
+
+    logger.info("Finished filtering and formatting records: %.2f seconds",
+                 time.time() - start_time)
 
     return result_df.reset_index(drop=True)
 
