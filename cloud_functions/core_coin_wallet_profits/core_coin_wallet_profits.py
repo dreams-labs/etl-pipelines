@@ -20,29 +20,44 @@ def update_core_coin_wallet_profits(batch_number=None):  # pylint: disable=W0613
     """
     runs all functions in sequence to refresh core.coin_wallet_profits
     """
-    # Retrieve transfers data and the mapping needed to convert wallet ids back to addresses
-    transfers_df, wallet_address_mapping = retrieve_transfers_data(batch_number)
+    start_time = time.time()
 
-    # Retrieve prices data
+    # Retrieve transfers and prices data
+    transfers_df, wallet_address_mapping = retrieve_transfers_data(batch_number)
     prices_df = retrieve_prices_df(batch_number)
+    logger.info('<1> Retrieved transfers and prices data  (%.2f seconds).',
+                time.time() - start_time)
+    step_time = time.time()
 
     # Calculate basic profitability data from transfers and prices, then clear memory
     profits_df = merge_prices_and_transfers(transfers_df, prices_df)
-    del transfers_df, prices_df
+    profits_df = add_first_price_info(profits_df,prices_df)
+    del transfers_df,prices_df
     gc.collect()
+    logger.info('<2> Merged transfers and prices data after (%.2f seconds).',
+                time.time() - step_time)
+    step_time = time.time()
 
     # Append new records to accomodate transfer history without price data
-    profits_df = add_first_price_info(profits_df,prices_df)
     imputed_records = create_imputed_records(profits_df)
     profits_df = append_imputed_records(profits_df, imputed_records)
     profits_df = filter_pre_inflow_records(profits_df)
+    logger.info('<3> Imputed and filtered records to align wallet and price timing (%.2f seconds).',
+                time.time() - step_time)
+    step_time = time.time()
 
     # Calculate USD profitability metrics
     profits_df = calculate_wallet_profitability(profits_df)
+    logger.info('<4> Calculated wallet proftability (%.2f seconds).',
+                time.time() - step_time)
+    step_time = time.time()
+
 
     # Upload the df
     profits_df['wallet_address'] = wallet_address_mapping[profits_df['wallet_address']]
     upload_profits_data(profits_df, batch_number)
+    logger.info('<5> Uploaded profits data.  (%.2f seconds).',
+                time.time() - step_time)
 
     return '{{"profits_df upload successful."}}'
 
@@ -303,43 +318,79 @@ def create_imputed_records(profits_df):
     Returns:
     - imputed_records_df (pd.DataFrame): New records to be added, with same schema as input df
     """
+    start_time = time.time()
+    logger.info('Generating imputed rows for profits_df...')
+
     if profits_df.empty:
         return pd.DataFrame(columns=profits_df.columns)
 
-    # Group by coin and wallet to assess each combination independently
-    groups = profits_df.groupby(['coin_id', 'wallet_address'], observed=True)
+    # Identify the coin-wallet pairs that need imputed records
+    pre_price_transfers = (profits_df[
+        profits_df['date']<profits_df['first_price_date']]
+        )
+    has_pre_price_transfers = pre_price_transfers[['coin_id','wallet_address']].drop_duplicates()
 
-    imputation_needed = []
-    for _, group_df in groups:
-        # Check conditions for this specific wallet-coin combination
-        has_transfers_before_prices = not group_df[
-            group_df['date'] < group_df['first_price_date']].empty
-        no_activity_on_first_price_date = group_df[
-            group_df['date'] == group_df['first_price_date']].empty
+    has_activity_on_first_price_date = (profits_df[
+        profits_df['date']==profits_df['first_price_date']][['coin_id','wallet_address']]
+        .drop_duplicates())
 
-        if has_transfers_before_prices and no_activity_on_first_price_date:
-            # Get the latest pre-price balance for this wallet-coin
-            pre_price_balance = (
-                group_df[group_df['date'] < group_df['first_price_date']]
-                .sort_values('date')
-                .iloc[-1]
-            )
-            imputation_needed.append(pre_price_balance)
+    # Filter to only the coin-wallet pairs that need imputed records
+    needs_imputation = (
+        has_pre_price_transfers.merge(
+            has_activity_on_first_price_date,
+            on=['coin_id', 'wallet_address'],
+            how='left',
+            indicator=True
+        )
+    )
+    needs_imputation = needs_imputation[needs_imputation['_merge'] == 'left_only']
+    needs_imputation = needs_imputation.drop(columns=['_merge'])
 
-    if not imputation_needed:
-        return pd.DataFrame(columns=profits_df.columns)
+    # Identify and append the wallet balances prior to the first price
+    pre_price_balances = pre_price_transfers.merge(
+        needs_imputation,
+        on=['coin_id','wallet_address'],
+        how='inner'
+    )
+    pre_price_balances = pre_price_balances.groupby(['coin_id','wallet_address'], observed=True)['balance'].last()
 
-    # Create imputed records for all wallets needing them
-    imputed_records = pd.DataFrame(imputation_needed)
+    needs_imputation = (
+        needs_imputation
+        .merge(
+            pre_price_balances,
+            on=['coin_id','wallet_address'],
+            how='inner'
+        )
+    )
 
-    # Set up the imputed records with carried forward balance as transfer
-    imputed_records['coin_id'] = imputed_records['coin_id'].astype('category')
-    imputed_records['date'] = imputed_records['first_price_date']
-    imputed_records['net_transfers'] = imputed_records['balance']
-    imputed_records['price'] = imputed_records['first_price']
+    # Identify and append the first available price data of the coin
+    first_prices_df = profits_df[['coin_id','first_price_date','first_price']].drop_duplicates()
 
-    # Return only the columns from the input DataFrame
-    return imputed_records[profits_df.columns]
+    needs_imputation = (
+        needs_imputation
+        .merge(
+            first_prices_df,
+            on=['coin_id'],
+            how='inner'
+        )
+    )
+
+    # Combine all datasets into a df that matches profits_df structure
+    imputed_records = pd.DataFrame()
+    imputed_records['coin_id'] = needs_imputation['coin_id']
+    imputed_records['date'] = pd.to_datetime(needs_imputation['first_price_date'])
+    imputed_records['wallet_address'] = needs_imputation['wallet_address']
+    imputed_records['net_transfers'] = needs_imputation['balance']
+    imputed_records['balance'] = needs_imputation['balance']
+    imputed_records['price'] = needs_imputation['first_price']
+    imputed_records['first_price_date'] = pd.to_datetime(needs_imputation['first_price_date'])
+    imputed_records['first_price'] = needs_imputation['first_price']
+
+
+    logger.info("Row imputation complete: %.2f seconds",
+                 time.time() - start_time)
+
+    return imputed_records
 
 
 
@@ -355,6 +406,9 @@ def append_imputed_records(profits_df, imputed_records):
     Returns:
     - combined_df (pd.DataFrame): DataFrame with correct transfer records from price data start
     """
+    start_time = time.time()
+    logger.info('Appending imputed rows to profits_df...')
+
     if profits_df.empty:
         return profits_df
 
@@ -375,6 +429,10 @@ def append_imputed_records(profits_df, imputed_records):
     # Reset coin_id to categorical
     result_df['coin_id'] = result_df['coin_id'].astype('category')
 
+    logger.info("Finished appending imputed records: %.2f seconds",
+                 time.time() - start_time)
+
+
     return result_df.reset_index(drop=True)
 
 
@@ -391,6 +449,9 @@ def filter_pre_inflow_records(profits_df):
     Returns:
     - filtered_df (pd.DataFrame): DataFrame with only post-inflow records
     """
+    start_time = time.time()
+    logger.info('Filtering missing data and formatting profits_df...')
+
     if profits_df.empty:
         return profits_df
 
@@ -413,6 +474,9 @@ def filter_pre_inflow_records(profits_df):
         'token_inflows',
         'token_inflows_cumulative'
     ])
+
+    logger.info("Finished filtering and formatting records: %.2f seconds",
+                 time.time() - start_time)
 
     return result_df.reset_index(drop=True)
 

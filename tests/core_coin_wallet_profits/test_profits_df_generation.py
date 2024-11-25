@@ -556,6 +556,7 @@ def test_create_imputed_records_multiple_wallets():
             # Wallet2 balances
             200.0, 150.0, 225.0, 250.0
         ],
+        'price': [np.nan, np.nan, 1.1, 1.2, np.nan, np.nan, 1.1, 1.2],
         'first_price_date': pd.to_datetime('2024-01-03'),  # First price date for the coin
         'first_price': 1.0  # First available price
     })
@@ -575,6 +576,7 @@ def test_create_imputed_records_multiple_wallets():
         'date': pd.to_datetime(['2024-01-03']),  # first_price_date
         'net_transfers': [150.0],  # Latest pre-price balance
         'balance': [150.0],        # Same as net_transfers for imputed record
+        'price': [1.0],
         'first_price_date': pd.to_datetime(['2024-01-03']),
         'first_price': [1.0]
     })
