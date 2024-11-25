@@ -121,7 +121,8 @@ def retrieve_updates_df():
             or cds.most_recent_search < (current_date('UTC') - 2))
             AND
             -- doesn't have market data from the last 2 days
-            ((cds.most_recent_market_data) < (current_date('UTC') - 2))
+            (cds.most_recent_market_data is null
+            or (cds.most_recent_market_data) < (current_date('UTC') - 2))
         )
         -- has never had 404 code
         and cds.has_404_code = 0
