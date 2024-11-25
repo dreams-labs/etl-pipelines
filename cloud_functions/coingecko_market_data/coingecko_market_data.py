@@ -3,8 +3,8 @@ cloud function that updates the bigquery table `etl_pipelines.coin_market_data_c
     making api calls to coingecko to get market data and uploading it
 '''
 import datetime
-import time
 import os
+import concurrent.futures
 from pytz import utc
 import pandas as pd
 import requests
@@ -14,90 +14,93 @@ from google.cloud import bigquery
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
+# pylint: disable=W1203  # f strings in logs
+
 # set up logger at the module level
 logger = dc.setup_logger()
 
 
 @functions_framework.http
-def update_coin_market_data_coingecko(request):  # pylint: disable=unused-argument  # noqa: F841
+def update_coin_market_data_coingecko(request):
     '''
-    runs all functions in sequence to update and upload the coingecko market data to
-    etl_pipelines.update_coin_market_data_coingecko.
+    Cloud function that updates the BigQuery table `etl_pipelines.coin_market_data_coingecko` by
+    making concurrent API calls to CoinGecko to get market data and uploading it.
 
-    key steps:
-        1. retrieve a df showing the coins that are stale enough to need updates
-        2. for each coin in need of updates, ping the coingecko api and format any
-            new records, then upload them to bigquery.
+    The function processes coins in parallel batches using a thread pool executor. Each batch
+    retrieves market data for multiple coins and uploads the combined results to BigQuery.
+
+    Args:
+        request (flask.Request): The request object containing optional parameters:
+            - batch_size (int): Number of coins to process in each batch (default: 100)
+            - max_workers (int): Number of concurrent worker threads (default: 5)
+
+    Request Parameters:
+        batch_size (optional): Number of coins per batch
+            - Type: integer
+            - Default: 100
+            - Example: ?batch_size=50
+        max_workers (optional): Number of concurrent threads
+            - Type: integer
+            - Default: 5
+            - Example: ?max_workers=3
+
+    Returns:
+        str: JSON string with status code indicating completion
+
+    Key Steps:
+        1. Retrieve list of coins needing market data updates
+        2. Split coins into batches for concurrent processing
+        3. Process batches in parallel using thread pool
+        4. Combine results and upload to BigQuery
+
+    Example Usage:
+        # Default parameters
+        POST /update_coin_market_data_coingecko
+
+        # Custom batch size and workers
+        POST /update_coin_market_data_coingecko?batch_size=50&max_workers=3
     '''
-    # 1. retrieve list of coins with a coingecko_id that need market data updates
+    # Get parameters from request with defaults
+    batch_size = int(request.args.get('batch_size', 100))
+    max_workers = int(request.args.get('max_workers', 5))
+
+    logger.info(f'Starting update with batch_size={batch_size}, max_workers={max_workers}')
+
+    # Retrieve coins needing updates
     updates_df = retrieve_updates_df()
     logger.info('retrieved bigquery for %s records with stale coingecko market data...',
                 len(updates_df))
 
-    # 2. retrieve market data for each coin in need of updates
-
-    all_market_data = []
-    batch_size = 3
-
-    # Initialize BigQuery client
+    # Initialize a single BigQuery client
     client = bigquery.Client()
 
-    for i in range(updates_df.shape[0]):
-        try:
-            # Coingecko API limit: 30 calls per minute, so pause for 2 seconds.
-            if i > 0:
-                time.sleep(2)
+    # Split updates_df into batches
+    batches = [updates_df[i:i + batch_size] for i in range(0, len(updates_df), batch_size)]
 
-            # Store iteration-specific variables
-            coingecko_id = updates_df['coingecko_id'][i]
+    all_market_data = []
 
-            # Prepare pandas date series of existing records to filter to only new rows
-            dates_with_records = updates_df[updates_df['coingecko_id'] == coingecko_id]['all_dates']
-            if not dates_with_records.empty:
-                dates_with_records = pd.Series([date for date in dates_with_records.iloc[0]])
-                dates_with_records = pd.to_datetime(dates_with_records).dt.tz_localize('UTC')
+    # Process batches concurrently
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_batch = {executor.submit(process_coin_batch, batch, client): i
+                          for i, batch in enumerate(batches)}
 
-            # Retrieve Coingecko market data
-            logger.info('Retrieving coingecko data for %s...', coingecko_id)
-            api_market_df, api_status_code = retrieve_coingecko_market_data(coingecko_id)
-            log_market_data_search(client, coingecko_id, api_status_code, api_market_df)
+        for future in concurrent.futures.as_completed(future_to_batch):
+            batch_num = future_to_batch[future]
+            try:
+                batch_results = future.result()
+                if batch_results:
+                    all_market_data.extend(batch_results)
+                    logger.info(f'Completed batch {batch_num + 1}/{len(batches)}')
+            except Exception as e:
+                logger.error(f'Batch {batch_num} generated an exception: {str(e)}')
 
-            if api_status_code == 200:
-                if not api_market_df.empty:
-                    logger.info('Successfully retrieved %s records for %s.', len(api_market_df), coingecko_id)
-
-                    # Format and filter market data to prepare for upload
-                    market_df = format_and_add_columns(api_market_df, coingecko_id, dates_with_records)
-
-                    # if there are new dates to upload, append to all_market_data
-                    if not market_df.empty:
-                        all_market_data.append(market_df)
-
-                else:
-                    logger.info('No new records found for %s.', coingecko_id)
-
-            # If modulo of batch_size is 0, we have reached a full batch
-            if (i + 1) % batch_size == 0:
-
-                if all_market_data:
-                    combined_market_df = pd.concat(all_market_data, ignore_index=True)
-                    logger.info('Uploading batch of market data...')
-                    upload_market_data(combined_market_df)
-                    all_market_data = []  # Clear the list after upload
-
-        except requests.RequestException as req_err:
-            logger.error('Network error while retrieving data for %s: %s', coingecko_id, req_err)
-        except ValueError as val_err:
-            logger.error('Data processing error for %s: %s', coingecko_id, val_err)
-
-    # Upload any remaining data after the loop ends
+    # Upload all collected data
     if all_market_data:
         combined_market_df = pd.concat(all_market_data, ignore_index=True)
-        logger.info('Uploading final batch of market data...')
+        logger.info('Uploading combined market data...')
         upload_market_data(combined_market_df)
 
     logger.info('update_coin_market_data_coingecko() completed successfully.')
-
     return '{"status":"200"}'
 
 
@@ -139,11 +142,50 @@ def retrieve_updates_df():
         -- has never had 404 code
         and cds.has_404_code = 0
         group by 1,2
+        limit 25
         '''
 
     updates_df = dgc().run_sql(query_sql)
 
     return updates_df
+
+
+
+def process_coin_batch(coin_batch_df, client):
+    """
+    Process a batch of coins and return their market data
+
+    Args:
+        coin_batch_df (pd.DataFrame): DataFrame containing a batch of coins to process
+        client (bigquery.Client): Shared BigQuery client instance
+
+    Returns:
+        list: List of processed market data DataFrames
+    """
+    batch_market_data = []
+
+    for _, row in coin_batch_df.iterrows():
+        try:
+            coingecko_id = row['coingecko_id']
+            dates_with_records = row['all_dates']
+
+            if dates_with_records is not None and len(dates_with_records) > 0:
+                dates_with_records = pd.Series([date for date in dates_with_records])
+                dates_with_records = pd.to_datetime(dates_with_records).dt.tz_localize('UTC')
+
+            api_market_df, api_status_code = retrieve_coingecko_market_data(coingecko_id)
+            log_market_data_search(client, coingecko_id, api_status_code, api_market_df)
+
+            if api_status_code == 200 and not api_market_df.empty:
+                market_df = format_and_add_columns(api_market_df, coingecko_id, dates_with_records)
+                if not market_df.empty:
+                    batch_market_data.append(market_df)
+
+        except Exception as e:
+            logger.error(f"Error processing {coingecko_id}: {str(e)}")
+            continue
+
+    return batch_market_data
 
 
 
@@ -306,10 +348,15 @@ def ping_coingecko_api(coingecko_id):
         df (dataframe): formatted df of market data
         status_code (int): status code of coingecko api call
     '''
-    api_key = os.getenv('COINGECKO_API_KEY')
+    coingecko_api_key = os.getenv('COINGECKO_API_KEY')
 
-    url = f'https://api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=365&interval=daily&x_cg_demo_api_key={api_key}' # pylint: disable=C0301
-    r = requests.get(url, timeout=30)
+    url = f'https://pro-api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=365&interval=daily' # pylint: disable=C0301
+
+    headers = {
+        "accept": "application/json",
+        "x-cg-pro-api-key": coingecko_api_key
+    }
+    r = requests.get(url, headers=headers, timeout=30)
 
     data = r.json()
     if r.status_code == 200:
