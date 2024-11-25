@@ -4,6 +4,7 @@ cloud function that updates the bigquery table `etl_pipelines.coin_market_data_c
 '''
 import datetime
 import os
+import uuid
 import json
 import concurrent.futures
 from pytz import utc
@@ -178,6 +179,9 @@ def process_coin_batch(coin_batch_df, client):
             return True
         except Exception as upload_error:
             logger.error(f"Failed to upload batch data: {str(upload_error)}")
+
+            # Store the failed batch in GCS and BigQuery
+            log_failed_upload(combined_market_df)
             return False
 
     logger.warning("No market data collected for this batch")
@@ -473,3 +477,64 @@ def log_market_data_search(client, coingecko_id, api_status_code, market_df):
         logger.error("Failed to log market data search outcome: %s", errors)
     else:
         logger.info("Logged market data search outcome for %s.", coingecko_id)
+
+
+def log_failed_upload(combined_market_df):
+    """
+    Logs failed uploads to GCS and bigquery. The full df is stored in GCS folder
+    'etl_objects/coingecko_market_data_failed_batches' and the coingecko_ids are stored
+    in bigquery table 'etl_pipelines.coin_market_data_coingecko_upload_failures'.
+
+    Params:
+    - combined_market_df (pd.DataFrame): the data that failed to upload to the
+        table etl_pipelines.coin_market_data_coingecko
+    """
+
+    # Define filename and upload failed batch for review
+    current_datetime = datetime.datetime.now(utc).strftime('%Y%m%d_%H%M')
+    random_uuid = uuid.uuid4()
+    filename = f"failed_batch_{len(combined_market_df)}_{current_datetime}_{random_uuid}.csv"
+    gcs_folder='etl_objects/coingecko_market_data_failed_batches'
+
+    # Upload to GCS
+    try:
+        dgc().gcs_upload_file(
+            combined_market_df,
+            gcs_folder=gcs_folder,
+            filename=filename
+        )
+        logger.info("Uploaded failed batch to GCS folder '%s' as %s.", gcs_folder, filename)
+    except Exception as e:
+        logger.error("Failed to upload failed batch to GCS: %s", e)
+
+
+    # Define df to be uploaded to BigQuery
+    upload_failures_df = pd.DataFrame()
+    upload_failures_df['coingecko_id'] = combined_market_df['coingecko_id']
+    upload_failures_df['updated_at'] = current_datetime
+
+    # set df datatypes of upload df
+    dtype_mapping = {
+        'coingecko_id': str,
+        'updated_at': 'datetime64[ns, UTC]'
+    }
+    upload_failures_df = upload_failures_df.astype(dtype_mapping)
+
+    # upload df to bigquery
+    project_id = 'western-verve-411004'
+    table_name = 'etl_pipelines.coin_market_data_coingecko_upload_failures'
+    schema = [
+        {'name':'coingecko_id', 'type': 'string'},
+        {'name':'updated_at', 'type': 'datetime'}
+    ]
+
+    pandas_gbq.to_gbq(
+        upload_failures_df
+        ,table_name
+        ,project_id=project_id
+        ,if_exists='append'
+        ,table_schema=schema
+        ,progress_bar=False
+    )
+    logger.info('Appended coingecko_ids in failed batch to %s.', table_name)
+
