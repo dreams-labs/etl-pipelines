@@ -89,9 +89,9 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
                 ,storage_client
             )
 
-        # rate limit pause
-        logger.info('pausing 15 seconds to avoid coingecko api rate limit issues...')
-        time.sleep(15)
+        # # rate limit pause
+        # logger.info('pausing 15 seconds to avoid coingecko api rate limit issues...')
+        # time.sleep(15)
 
     return "coingecko metadata update completed."
 
@@ -172,8 +172,15 @@ def fetch_coingecko_data(blockchain, address, max_retries=3, retry_delay=30):
     returns: response_data <dict> JSON response data from Coingecko API
     """
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
-    headers = {'x_cg_pro_api_key': coingecko_api_key}
-    url = f'https://api.coingecko.com/api/v3/coins/{blockchain}/contract/{address}'
+
+    url = "https://pro-api.coingecko.com/api/v3/coins/id/contract/contract_address"
+
+    headers = {
+        "accept": "application/json",
+        "x-cg-pro-api-key": coingecko_api_key
+    }
+
+    url = f'https://pro-api.coingecko.com/api/v3/coins/{blockchain}/contract/{address}'
 
     for attempt in range(max_retries):
         response = requests.get(url, headers=headers, timeout=30)
