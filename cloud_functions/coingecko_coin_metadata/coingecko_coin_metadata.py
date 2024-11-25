@@ -121,12 +121,12 @@ def coingecko_metadata_search(blockchain, address, coin_id, bigquery_client, sto
         coingecko_id = None
         search_successful = False
         search_log = 'KeyError: ID not found in response data'
-        logger.info('FAILURE: KeyError - search failed for <%s:%s>', blockchain, address)
+        logger.warning('FAILURE: KeyError - search failed for <%s:%s>', blockchain, address)
     except (TypeError, AttributeError):
         coingecko_id = None
         search_successful = False
         search_log = 'TypeError or AttributeError: Invalid response data'
-        logger.info('FAILURE: TypeError or AttributeError - search failed for <%s:%s>'
+        logger.warning('FAILURE: TypeError or AttributeError - search failed for <%s:%s>'
                     , blockchain, address)
 
     # storing json in gcs
