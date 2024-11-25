@@ -129,7 +129,6 @@ def retrieve_updates_df():
             -- or if recent searches returned valid new records
             AND (
                 cds.most_recent_search is null
-
                 OR (
                       cds.most_recent_search > (current_date('UTC') - 2)
                       AND sl.new_records > 0
@@ -139,7 +138,6 @@ def retrieve_updates_df():
         -- has never had 404 code
         and cds.has_404_code = 0
         group by 1,2
-        -- limit 20
         '''
 
     updates_df = dgc().run_sql(query_sql)
@@ -189,7 +187,7 @@ def process_coin_batch(coin_batch_df, client):
         try:
             combined_market_df = pd.concat(batch_market_data, ignore_index=True)
             upload_market_data(combined_market_df)
-            logger.info(f"Successfully uploaded batch data with {len(batch_market_data)} coins")
+            logger.debug(f"Successfully uploaded batch data with {len(batch_market_data)} coins")
             return True
         except Exception as upload_error:
             logger.error(f"Failed to upload batch data: {str(upload_error)}")
@@ -198,8 +196,9 @@ def process_coin_batch(coin_batch_df, client):
             log_failed_upload(combined_market_df)
             return False
 
+    # If no new records were returned, the batch sequence still succeeded
     logger.warning("No market data collected for this batch")
-    return False
+    return True
 
 
 
@@ -231,7 +230,7 @@ def retrieve_coingecko_market_data(coingecko_id):
             logger.error('unexpected coingecko api status code %s for %s, continuing to next coin.',
                 str(api_status_code), coingecko_id)
             break
-    logger.info('coingecko api call for %s completed with status code %s.',
+    logger.debug('coingecko api call for %s completed with status code %s.',
         coingecko_id, str(api_status_code))
 
     return market_df, api_status_code
@@ -433,8 +432,12 @@ def upload_market_data(market_df):
     def adjust_for_bigquery_numeric(value):
         # Parse scale from scientific notation
         str_value = f"{value:.15e}"
-        base, exponent = str_value.split('e')
+        _, exponent = str_value.split('e')
         scale = abs(int(exponent))  # Get the absolute scale
+
+        # if the precision is too small then return 0
+        if int(exponent) < -37:
+            return 0
 
         # Adjust scale for small numbers (negative exponent)
         if int(exponent) < 0:
@@ -511,7 +514,7 @@ def log_market_data_search(client, coingecko_id, api_status_code, market_df, new
     if errors:
         logger.error("Failed to log market data search outcome: %s", errors)
     else:
-        logger.info("Logged market data search outcome for %s.", coingecko_id)
+        logger.debug("Logged market data search outcome for %s.", coingecko_id)
 
 
 def log_failed_upload(combined_market_df):
@@ -571,4 +574,3 @@ def log_failed_upload(combined_market_df):
         ,progress_bar=False
     )
     logger.info('Appended coingecko_ids in failed batch to %s.', table_name)
-
