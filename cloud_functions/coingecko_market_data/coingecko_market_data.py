@@ -346,7 +346,7 @@ def ping_coingecko_api(coingecko_id):
     '''
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
 
-    url = f'https://pro-api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=365&interval=daily' # pylint: disable=C0301
+    url = f'https://pro-api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=2000&interval=daily' # pylint: disable=C0301
 
     headers = {
         "accept": "application/json",
