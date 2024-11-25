@@ -115,7 +115,7 @@ def retrieve_updates_df():
         ,cds.most_recent_search
         ,array_agg(cmd.date IGNORE NULLS order by cmd.date asc) as all_dates
         from coingecko_data_status cds
-        join `etl_pipelines.coin_market_data_coingecko_search_logs` sl on sl.coingecko_id = cds.coingecko_id
+        left join `etl_pipelines.coin_market_data_coingecko_search_logs` sl on sl.coingecko_id = cds.coingecko_id
             and sl.created_at = cds.most_recent_search
         left join `etl_pipelines.coin_market_data_coingecko` cmd on cmd.coingecko_id = cds.coingecko_id
         where (
