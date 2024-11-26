@@ -9,6 +9,7 @@ logic to handle rate limits and HTTP errors gracefully.
 
 import time
 import datetime
+import os
 from pytz import utc
 import requests
 import pandas as pd
@@ -69,8 +70,9 @@ def update_geckoterminal_market_data(request):  # pylint: disable=unused-argumen
         if not market_df.empty:
             all_market_data.append(market_df)
 
-        # pause to accomodate 30 calls/minute rate limit
-        time.sleep(2)
+        # pause to accomodate 30 calls/minute free api rate limit
+        if not os.getenv('COINGECKO_API_KEY'):
+            time.sleep(2)
 
     if not all_market_data:
         return "no new market data found"
@@ -142,6 +144,50 @@ def retrieve_updates_df():
     return updates_df
 
 
+def make_api_request(endpoint_type: str, **params) -> requests.Response:
+    """
+    Centralized helper function for making API requests to either Coingecko Pro or
+    GeckoTerminal based on whether a COINGECKO_API_KEY is available as an env var.
+
+    Args:
+        endpoint_type: Type of endpoint ('token' or 'ohlcv')
+        **params: Parameters for constructing URL (blockchain, address, pool_address)
+    """
+    coingecko_api_key = os.getenv('COINGECKO_API_KEY')
+
+    # Define API configurations
+    if coingecko_api_key:
+        config = {
+            'base_url': "https://pro-api.coingecko.com/api/v3/onchain",
+            'headers': {
+                "accept": "application/json",
+                "x-cg-pro-api-key": coingecko_api_key
+            },
+            'endpoints': {
+                'token': "/networks/{blockchain}/tokens/{address}",
+                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day"
+            }
+        }
+    else:
+        config = {
+            'base_url': "https://api.geckoterminal.com/api/v2",
+            'headers': {},
+            'endpoints': {
+                'token': "/networks/{blockchain}/tokens/{address}",
+                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day"
+            }
+        }
+
+    # Construct URL
+    url = config['base_url'] + config['endpoints'][endpoint_type].format(**params)
+
+    # Make request
+    response = requests.get(url, headers=config['headers'], timeout=30)
+
+    return response
+
+
+
 # Function to retrieve all pool addresses for a list of blockchain/address pairs
 def retrieve_all_pool_addresses(all_blockchain_address_pairs):
     """
@@ -160,8 +206,9 @@ def retrieve_all_pool_addresses(all_blockchain_address_pairs):
         pair.append(pool_address)
         all_pairs_with_pools.append(pair)
 
-        # rest to accommodate rate limit of 30 calls per minute
-        time.sleep(2)
+        # rest to accommodate free api rate limit of 30 calls per minute
+        if not os.getenv('COINGECKO_API_KEY'):
+            time.sleep(2)
 
     return all_pairs_with_pools
 
@@ -193,10 +240,7 @@ def retrieve_pool_address(blockchain, address):
     for attempt in range(retries):
         try:
             # make request to geckoterminal api
-            r = requests.get(
-                f"https://api.geckoterminal.com/api/v2/networks/{blockchain}/tokens/{address}"
-                ,timeout=30
-            )
+            r = make_api_request('token', blockchain=blockchain, address=address)
 
             # logic for handling rate limit codes and HTTP errors
             if r.status_code == 429:
@@ -252,8 +296,6 @@ def retrieve_market_data_for_pool(pair):
     Returns:
     market_df (dataframe): Either a dataframe with valid OHLCV data or an empty dataframe
     """
-    BASE_URL = "https://api.geckoterminal.com/api/v2/networks"  # pylint: disable=C0103
-
     geckoterminal_id = pair[0]
     blockchain = pair[1]
     token_address = pair[2]
@@ -261,8 +303,10 @@ def retrieve_market_data_for_pool(pair):
 
     try:
         # Make the request
-        r = requests.get(f"{BASE_URL}/{blockchain}/pools/{pool_address}/ohlcv/day",
-                         timeout=30)
+        r = make_api_request('ohlcv', blockchain=blockchain, pool_address=pool_address)
+
+        # r = requests.get(f"{BASE_URL}/{blockchain}/pools/{pool_address}/ohlcv/day",
+        #                  timeout=30)
 
         # Raise an HTTPError if the HTTP request returned an unsuccessful status code
         r.raise_for_status()
