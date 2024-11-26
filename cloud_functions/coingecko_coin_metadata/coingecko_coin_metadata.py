@@ -94,7 +94,7 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
                 logger.error(f"Unexpected thread error: {str(e)}")
 
     summary = f"Coingecko metadata update completed. Successful: {results['successful']}, " \
-               "Failed: {results['failed']}"
+              f"Failed: {results['failed']}"
     logger.info(summary)
     return summary
 
@@ -187,7 +187,7 @@ def coingecko_metadata_search(blockchain, address, coin_id, bigquery_client, sto
         blob = bucket.blob(filepath + filename)
         blob.upload_from_string(json.dumps(response_data), content_type='json')
 
-        logger.info('%s uploaded successfully', filename)
+        logger.debug('%s uploaded successfully', filename)
 
     # store search result in etl_pipelines.coin_coingecko_ids
     table_id = 'western-verve-411004.etl_pipelines.coin_coingecko_ids'
@@ -202,9 +202,9 @@ def coingecko_metadata_search(blockchain, address, coin_id, bigquery_client, sto
 
     errors = bigquery_client.insert_rows_json(table_id, rows_to_insert)  # Make an API request.
     if not errors:
-        logger.info("new row added to etl_pipelines.coin_coingecko_ids")
+        logger.debug("new row added to etl_pipelines.coin_coingecko_ids")
     else:
-        logger.info("Encountered errors while inserting rows: %s", errors)
+        logger.warning("Encountered errors while inserting rows: %s", errors)
 
     return search_successful
 

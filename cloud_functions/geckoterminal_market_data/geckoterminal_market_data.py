@@ -72,9 +72,10 @@ def update_geckoterminal_market_data(request):  # pylint: disable=unused-argumen
         # pause to accomodate 30 calls/minute rate limit
         time.sleep(2)
 
-    if all_market_data:
-        combined_market_df = pd.concat(all_market_data, ignore_index=True)
+    if not all_market_data:
+        return "no new market data found"
 
+    combined_market_df = pd.concat(all_market_data, ignore_index=True)
 
     # 4. Filter existing records and upload the remaining market data to BigQuery
     # ---------------------------------------------------------------------------
