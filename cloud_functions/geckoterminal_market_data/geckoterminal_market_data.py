@@ -43,6 +43,7 @@ def update_geckoterminal_market_data(request):  # pylint: disable=unused-argumen
     # -----------------------------------------------------
     # Retrieve the list of all coins to be updated
     updates_df = retrieve_updates_df()
+    logger.info("Retrieved updates_df with %s coins.", len(updates_df))
 
     # Generate a list of arrays containing each token's id, chain, and address
     all_blockchain_address_pairs = [
@@ -165,7 +166,7 @@ def make_api_request(endpoint_type: str, **params) -> requests.Response:
             },
             'endpoints': {
                 'token': "/networks/{blockchain}/tokens/{address}",
-                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day"
+                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day?limit=1000"
             }
         }
     else:
@@ -174,7 +175,7 @@ def make_api_request(endpoint_type: str, **params) -> requests.Response:
             'headers': {},
             'endpoints': {
                 'token': "/networks/{blockchain}/tokens/{address}",
-                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day"
+                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day?limit=1000"
             }
         }
 
@@ -262,7 +263,7 @@ def retrieve_pool_address(blockchain, address):
 
                 split_chain_and_pool_address = pool_pair.split("_")
                 pool_address = split_chain_and_pool_address[-1]
-                logger.debug("Retrieved pool address for %s:%s", blockchain, address)
+                logger.info("Retrieved pool address for %s:%s", blockchain, address)
 
                 return pool_address
 
@@ -304,9 +305,6 @@ def retrieve_market_data_for_pool(pair):
     try:
         # Make the request
         r = make_api_request('ohlcv', blockchain=blockchain, pool_address=pool_address)
-
-        # r = requests.get(f"{BASE_URL}/{blockchain}/pools/{pool_address}/ohlcv/day",
-        #                  timeout=30)
 
         # Raise an HTTPError if the HTTP request returned an unsuccessful status code
         r.raise_for_status()
