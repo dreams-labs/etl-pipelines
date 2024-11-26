@@ -39,7 +39,17 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
     """
     Queries BigQuery to obtain a list of coins that need metadata and attempts to match them and
     store metadata by calling coingecko_metadata_search() for each.
+
+    Args:
+    request (flask.Request): The request object containing optional parameters:
+        - batch_size (int): Number of coins to process in each batch (default: 100)
+        - max_workers (int): Number of concurrent worker threads (default: 5)
+
+    Returns:
+        str: JSON string with status and batch processing results
     """
+    # Get parameters from request with defaults
+    max_workers = int(request.args.get('max_workers', 5))
 
     # get GCP credentials
     credentials = dgc().credentials
@@ -49,26 +59,41 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
     # Get coins in need of update
     update_queue_df = retrieve_tokens_to_update()
 
-    # ping api for each coin
-    for i in range(len(update_queue_df)):
-        blockchain = update_queue_df.iloc[i]['chain_text_coingecko']
-        address = update_queue_df.iloc[i]['address']
-        coin_id = update_queue_df.iloc[i]['coin_id']
+    # New threading implementation
+    results = {'successful': 0, 'failed': 0}
 
-        logger.info('initiating coingecko metadata search for <%s:%s>', blockchain, address)
-        coingecko_metadata_search(
-                blockchain
-                ,address
-                ,coin_id
-                ,bigquery_client
-                ,storage_client
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Create futures for all tokens
+        futures = []
+        for i in range(len(update_queue_df)):
+            row = update_queue_df.iloc[i]
+            futures.append(
+                executor.submit(
+                    coingecko_metadata_search,
+                    row['chain_text_coingecko'],
+                    row['address'],
+                    row['coin_id'],
+                    bigquery_client,
+                    storage_client
+                )
             )
 
-        # # rate limit pause
-        # logger.info('pausing 15 seconds to avoid coingecko api rate limit issues...')
-        # time.sleep(15)
+        # Process results as they complete
+        for future in as_completed(futures):
+            try:
+                success = future.result()  # Gets return value from coingecko_metadata_search
+                if success:
+                    results['successful'] += 1
+                else:
+                    results['failed'] += 1
+            except Exception as e:
+                results['failed'] += 1
+                logger.error(f"Unexpected thread error: {str(e)}")
 
-    return "coingecko metadata update completed."
+    summary = f"Coingecko metadata update completed. Successful: {results['successful']}, Failed: {results['failed']}"
+    logger.info(summary)
+    return summary
+
 
 
 
@@ -123,6 +148,9 @@ def coingecko_metadata_search(blockchain, address, coin_id, bigquery_client, sto
     param: coin_id <dataframe> core.coins.coin_id which is added to bigquery records
     param: bigquery_client <dataframe> authenticated client for inserting rows to BigQuery
     param: storage_client <dataframe> authenticated client for uploading to GCS
+
+    return: search_successful <bool> returns True if the result contains the expected
+        data structure and false if the data is malformed or if the API does not give 200
     """
 
     # making the api call
@@ -173,6 +201,8 @@ def coingecko_metadata_search(blockchain, address, coin_id, bigquery_client, sto
         logger.info("new row added to etl_pipelines.coin_coingecko_ids")
     else:
         logger.info("Encountered errors while inserting rows: %s", errors)
+
+    return search_successful
 
 
 
