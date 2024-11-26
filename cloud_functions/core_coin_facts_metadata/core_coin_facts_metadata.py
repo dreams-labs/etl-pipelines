@@ -73,9 +73,12 @@ def rebuild_coin_facts_metadata(request):  # pylint: disable=unused-argument  # 
                 -- Coalesce with logic to prevent 0 values from overwriting non-zero values
                 ,CAST(
                     CASE
-                        WHEN cg.max_supply IS NOT NULL AND cg.max_supply > 0 THEN cg.max_supply
-                        WHEN gt.total_supply IS NOT NULL AND gt.total_supply > 0 then gt.total_supply
-                        WHEN cg.total_supply IS NOT NULL AND cg.total_supply > 0 THEN cg.total_supply
+                        WHEN cg.max_supply IS NOT NULL
+                            AND cg.max_supply > 0 and cg.max_supply <= 10e36 THEN cg.max_supply
+                        WHEN gt.total_supply IS NOT NULL
+                            AND gt.total_supply > 0 and gt.total_supply <= 10e36 then gt.total_supply
+                        WHEN cg.total_supply IS NOT NULL
+                            AND cg.total_supply > 0 and cg.total_supply <= 10e36 THEN cg.total_supply
                     END AS numeric) AS total_supply
 
                 ,CASE
