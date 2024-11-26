@@ -79,7 +79,7 @@ def retrieve_geckoterminal_metadata(request):  # pylint: disable=unused-argument
         address = row['address']
         coin_id = row['coin_id']
 
-        logger.info('Initiating geckoterminal metadata search for <%s:%s>', blockchain, address)
+        logger.debug('Initiating geckoterminal metadata search for <%s:%s>', blockchain, address)
         # Pass the storage and bigquery clients to the search function
         geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, bigquery_client)
 

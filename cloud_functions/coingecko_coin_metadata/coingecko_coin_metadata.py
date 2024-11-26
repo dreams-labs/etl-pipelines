@@ -29,6 +29,9 @@ from google.cloud import storage
 from dreams_core.googlecloud import GoogleCloud as dgc
 import dreams_core.core as dc
 
+# pylint: disable=W1203 no f strings in logs
+
+
 # set up logger at the module level
 logger = dc.setup_logger()
 
@@ -90,7 +93,8 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
                 results['failed'] += 1
                 logger.error(f"Unexpected thread error: {str(e)}")
 
-    summary = f"Coingecko metadata update completed. Successful: {results['successful']}, Failed: {results['failed']}"
+    summary = f"Coingecko metadata update completed. Successful: {results['successful']}, " \
+               "Failed: {results['failed']}"
     logger.info(summary)
     return summary
 
