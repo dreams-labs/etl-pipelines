@@ -5,6 +5,7 @@ cloud function that updates the bigquery table `etl_pipelines.coin_market_data_c
 import datetime
 import os
 import uuid
+import logging
 import json
 import concurrent.futures
 from pytz import utc
@@ -377,7 +378,10 @@ def ping_coingecko_api(coingecko_id):
     if r.status_code == 200:
         # upload the raw response to cloud storage
         filename = f"{coingecko_id}_{datetime.datetime.now(utc).strftime('%Y%m%d_%H%M')}.json"
+
+        logging.getLogger('dgc').setLevel(logging.WARNING)
         dgc().gcs_upload_file(data, gcs_folder='data_lake/coingecko_market_data', filename=filename)
+        logging.getLogger('dgc').setLevel(logging.INFO)
 
         # convert json blob to a dataframe
         df = pd.DataFrame(data)

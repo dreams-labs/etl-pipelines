@@ -32,7 +32,7 @@ def add_coins_to_queue(min_rank,max_rank):
                 select *
                 ,coalesce(
                   market_cap_rank,
-                  row_number() over (order by fully_diluted_valuation desc, total_volume desc)
+                  row_number() over (order by coalesce(market_cap_rank,999999), fully_diluted_valuation desc, total_volume desc)
                  ) as imputed_rank
                 from (
                     select *
@@ -60,6 +60,7 @@ def add_coins_to_queue(min_rank,max_rank):
 
             -- don't intake coingecko_ids we've already put in the queue
             and iq.coingecko_id is null
+
             -- market cap filter
             and ms.imputed_rank between {min_rank} and {max_rank}
 
