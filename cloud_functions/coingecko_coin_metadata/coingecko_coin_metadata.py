@@ -20,6 +20,7 @@ efficiently while respecting Coingecko's API rate limits and handling errors gra
 import time
 import datetime
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import requests
 import functions_framework
@@ -45,6 +46,40 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
     bigquery_client = bigquery.Client(credentials=credentials, project='dreams-labs-data')
     storage_client = storage.Client(credentials=credentials, project='dreams-labs-data')
 
+    # Get coins in need of update
+    update_queue_df = retrieve_tokens_to_update()
+
+    # ping api for each coin
+    for i in range(len(update_queue_df)):
+        blockchain = update_queue_df.iloc[i]['chain_text_coingecko']
+        address = update_queue_df.iloc[i]['address']
+        coin_id = update_queue_df.iloc[i]['coin_id']
+
+        logger.info('initiating coingecko metadata search for <%s:%s>', blockchain, address)
+        coingecko_metadata_search(
+                blockchain
+                ,address
+                ,coin_id
+                ,bigquery_client
+                ,storage_client
+            )
+
+        # # rate limit pause
+        # logger.info('pausing 15 seconds to avoid coingecko api rate limit issues...')
+        # time.sleep(15)
+
+    return "coingecko metadata update completed."
+
+
+
+def retrieve_tokens_to_update():
+    """
+    Retrieves a list of tokens that need Coingecko metadata updates from BigQuery.
+
+    Returns:
+    - update_queue_df (pd.DataFrame): a df containing the coin_id, blockchain name, and
+        blockchain address of the coin needing an update.
+    """
 
     # pull list of coins to attempt
     query_sql = """
@@ -74,26 +109,7 @@ def retrieve_coingecko_metadata(request): # pylint: disable=unused-argument  # n
     update_queue_df = dgc().run_sql(query_sql)
     logger.info('coins to update: %s', str(update_queue_df.shape[0]))
 
-    # ping api for each coin
-    for i in range(len(update_queue_df)):
-        blockchain = update_queue_df.iloc[i]['chain_text_coingecko']
-        address = update_queue_df.iloc[i]['address']
-        coin_id = update_queue_df.iloc[i]['coin_id']
-
-        logger.info('initiating coingecko metadata search for <%s:%s>', blockchain, address)
-        coingecko_metadata_search(
-                blockchain
-                ,address
-                ,coin_id
-                ,bigquery_client
-                ,storage_client
-            )
-
-        # # rate limit pause
-        # logger.info('pausing 15 seconds to avoid coingecko api rate limit issues...')
-        # time.sleep(15)
-
-    return "coingecko metadata update completed."
+    return update_queue_df
 
 
 
