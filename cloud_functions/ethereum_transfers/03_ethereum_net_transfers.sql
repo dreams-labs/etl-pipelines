@@ -38,6 +38,18 @@ WITH all_transfers as (
     SELECT * FROM ethereum_transfers.transfers_cohort_3_2023
     UNION ALL
     SELECT * FROM ethereum_transfers.transfers_cohort_3_2024_1123
+
+    UNION ALL
+
+    SELECT * FROM ethereum_transfers.transfers_cohort_4_2020_and_earlier
+    UNION ALL
+    SELECT * FROM ethereum_transfers.transfers_cohort_4_2021
+    UNION ALL
+    SELECT * FROM ethereum_transfers.transfers_cohort_4_2022
+    UNION ALL
+    SELECT * FROM ethereum_transfers.transfers_cohort_4_2023
+    UNION ALL
+    SELECT * FROM ethereum_transfers.transfers_cohort_4_2024_1123
 )
 
 SELECT t.date
