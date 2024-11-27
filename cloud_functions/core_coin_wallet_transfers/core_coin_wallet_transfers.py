@@ -297,12 +297,12 @@ def rebuild_core_coin_wallet_transfers():
                 and boc.overage_wallets >= 5
 
             -- exclude all coin-wallet pairs with negative balances
-            and nw.lowest_balance > -0.1
+            where nw.lowest_balance > -0.1
 
             -- if a coin has more than 10 negative wallets, exclude all coin-wallet pairs
             -- for that coin. there is a buffer of 10 to allow for rounding errors, mint addresses \
             -- that haven't been excluded, etc
-            where nwc.negative_wallets < 10
+            and nwc.negative_wallets < 10
 
             -- exclude wallet addresses that have ever had any balance over total supply for any coin
             and bow.wallet_address is null
