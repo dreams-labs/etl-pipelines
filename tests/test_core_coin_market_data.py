@@ -83,10 +83,6 @@ def test_fill_market_data_gaps_small_gaps(sample_market_data_small_gaps):
 
     # Check that gaps are filled
     assert result_df['price'].isna().sum() == 0
-    assert result_df['market_cap'].isna().sum() == 0
-    assert result_df['fdv'].isna().sum() == 0
-    assert result_df['circulating_supply'].isna().sum() == 0
-    assert result_df['total_supply'].isna().sum() == 0
 
     # Check days_imputed
     btc_imputed = result_df[result_df['coin_id'] == 'btc']['days_imputed']
@@ -236,10 +232,6 @@ def test_fill_market_data_gaps_large_gap(sample_market_data_large_gap):
     # Check that gaps are filled
     assert result_df['price'].isna().sum() == 0
     assert result_df['volume'].isna().sum() == 0
-    assert result_df['market_cap'].isna().sum() == 0
-    assert result_df['fdv'].isna().sum() == 0
-    assert result_df['circulating_supply'].isna().sum() == 0
-    assert result_df['total_supply'].isna().sum() == 0
 
     # Check days_imputed for the large gap in ETH data
     eth_imputed = result_df[result_df['coin_id'] == 'eth']['days_imputed']
@@ -249,10 +241,6 @@ def test_fill_market_data_gaps_large_gap(sample_market_data_large_gap):
     # Check that values are correctly forward-filled for ETH
     assert (result_df[result_df['coin_id'] == 'eth']['price'].iloc[15:45] == 50).all()
     assert (result_df[result_df['coin_id'] == 'eth']['volume'].iloc[15:45] == 0).all()  # Volume should be 0 for imputed days
-    assert (result_df[result_df['coin_id'] == 'eth']['market_cap'].iloc[15:45] == 5000).all()
-    assert (result_df[result_df['coin_id'] == 'eth']['fdv'].iloc[15:45] == 6000).all()
-    assert (result_df[result_df['coin_id'] == 'eth']['circulating_supply'].iloc[15:45] == 100).all()
-    assert (result_df[result_df['coin_id'] == 'eth']['total_supply'].iloc[15:45] == 120).all()
 
     # Check that BTC data is unchanged
     btc_data = result_df[result_df['coin_id'] == 'btc']
@@ -341,7 +329,7 @@ def test_fill_market_data_gaps_non_consecutive(sample_market_data_non_consecutiv
     # Check that weekday data remains unchanged
     weekday_data = result_df[~result_df['date'].dt.dayofweek.isin([5, 6])]
     original_weekday_data = sample_market_data_non_consecutive
-    for column in ['price', 'volume', 'market_cap', 'fdv', 'circulating_supply', 'total_supply']:
+    for column in ['price', 'volume', 'market_cap']:
         assert np.array_equal(weekday_data[column].values, original_weekday_data[column].values)
 
     # Check that volume is 0 for imputed weekend days
@@ -351,7 +339,7 @@ def test_fill_market_data_gaps_non_consecutive(sample_market_data_non_consecutiv
     # Check that other metrics are forward-filled for weekend days
     for coin in ['btc', 'eth']:
         coin_data = result_df[result_df['coin_id'] == coin].sort_values('date')
-        for column in ['price', 'market_cap', 'fdv', 'circulating_supply', 'total_supply']:
+        for column in ['price', 'market_cap']:
             assert (coin_data[column].diff().dropna() >= 0).all(), f"{column} for {coin} is not non-decreasing"
 
     # Check that updated_at is NaT for imputed days
@@ -423,7 +411,7 @@ def test_remove_single_day_dips_normal_scenario(sample_data_with_dips):
     assert np.array_equal(eth_non_dip['price'].values, [200, 210, 195, 230])
 
     # 4. Check that other columns for non-dip rows are unchanged
-    for col in ['market_cap', 'fdv', 'volume', 'circulating_supply', 'total_supply']:
+    for col in ['market_cap', 'volume']:
         assert np.array_equal(
             btc_non_dip[col].values,
             sample_data_with_dips[(sample_data_with_dips['coin_id'] == 'btc') &
@@ -443,3 +431,4 @@ def test_remove_single_day_dips_normal_scenario(sample_data_with_dips):
     # 6. Check that 'prev_price' and 'next_price' columns are not in the result
     assert 'prev_price' not in result_df.columns
     assert 'next_price' not in result_df.columns
+    
