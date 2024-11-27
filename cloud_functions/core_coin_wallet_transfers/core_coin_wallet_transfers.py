@@ -290,7 +290,7 @@ def rebuild_core_coin_wallet_transfers():
             join negative_wallets_coins nwc on nwc.coin_id = cwt.coin_id
 
             left join (
-                select wallet_address from balance_overage_wallets bow group by 1
+                select coin_id,wallet_address from balance_overage_wallets bow group by 1,2
                 ) bow on bow.coin_id = cwt.coin_id
                     and bow.wallet_address = cwt.wallet_address
             left join balance_overage_coins boc on boc.coin_id = cwt.coin_id
