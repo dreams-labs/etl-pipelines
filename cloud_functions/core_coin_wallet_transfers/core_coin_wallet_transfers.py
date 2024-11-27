@@ -17,6 +17,7 @@ def update_core_coin_wallet_transfers(request):  # pylint: disable=W0613
     '''
     runs all functions in sequence to refresh core.coin_wallet_transfers
     '''
+    logger.info('updating coin and wallet exclusion tables...')
     # update list of addresses to be excluded from the core table
     update_wallet_exclusions_tables()
 
@@ -270,7 +271,12 @@ def rebuild_core_coin_wallet_transfers():
                 ,max(cwt.balance) as highest_balance
                 from coin_wallet_transfers_draft cwt
                 join core.coins c on c.coin_id = cwt.coin_id
-                and cwt.balance > c.total_supply
+                    and cwt.balance > c.total_supply
+
+                -- this was the only relevant coin I saw in the filter, the total supply
+                -- decreased dramatically because of the BEAM migration so there are many
+                -- overages when checked vs current total supply
+                where c.coingecko_id <> 'merit-circle'
                 group by 1,2,3
             ),
 
