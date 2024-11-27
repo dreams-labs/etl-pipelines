@@ -291,7 +291,8 @@ def rebuild_core_coin_wallet_transfers():
 
             left join (
                 select wallet_address from balance_overage_wallets bow group by 1
-                ) bow on bow.wallet_address = cwt.wallet_address
+                ) bow on bow.coin_id = cwt.coin_id
+                    and bow.wallet_address = cwt.wallet_address
             left join balance_overage_coins boc on boc.coin_id = cwt.coin_id
                 and boc.overage_wallets >= 5
 
