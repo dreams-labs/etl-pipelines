@@ -22,7 +22,7 @@ def retrieve_coingecko_all_coins_market_summary(request): # pylint: disable=unus
     '''
     Retrieves and n pages of the all coins market summary endpoint
 
-    Paraams:
+    Params:
         all_coins_pages (int): how many pages of records to return
     '''
 
@@ -65,9 +65,9 @@ def retrieve_coingecko_all_coins_market_summary(request): # pylint: disable=unus
 
         # if an empty array is returned, that means we don't have any more pages with data
 
-        # rate limit pause
-        logger.debug('pausing 15 seconds to avoid coingecko api rate limit issues...')
-        time.sleep(15)
+        # # rate limit pause
+        # logger.debug('pausing 15 seconds to avoid coingecko api rate limit issues...')
+        # time.sleep(15)
 
     return "coingecko metadata update completed."
 
@@ -92,6 +92,17 @@ def upload_coingecko_data_to_bigquery(
     parsed_date = datetime.datetime.strptime(batch_datetime, '%Y_%m_%d__%H_%M_%S')
     created_at = parsed_date.strftime('%Y-%m-%d %H:%M:%S')
 
+    # Helper function to parse datetime strings
+    def parse_datetime_field(datetime_str):
+        if datetime_str:
+            try:
+                # Parse ISO 8601 datetime string and reformat to BigQuery-compatible format
+                parsed_datetime = datetime.datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+                return parsed_datetime.strftime('%Y-%m-%d %H:%M:%S')
+            except ValueError as e:
+                logger.warning("Invalid datetime format: %s. Error: %s", datetime_str, e)
+                return None
+        return None
 
     # Prepare rows for BigQuery
     rows_to_insert = []
@@ -105,9 +116,9 @@ def upload_coingecko_data_to_bigquery(
             "market_cap_rank": coin.get("market_cap_rank"),
             "fully_diluted_valuation": coin.get("fully_diluted_valuation"),
             "total_volume": coin.get("total_volume"),
-            "ath_date": coin.get("ath_date").replace("Z", "") if coin.get("ath_date") else None,
-            "atl_date": coin.get("atl_date").replace("Z", "") if coin.get("atl_date") else None,
-            "last_updated_coingecko": coin.get("last_updated").replace("Z", "") if coin.get("last_updated") else None,  # pylint: disable=C0301
+            "ath_date": parse_datetime_field(coin.get("ath_date")),
+            "atl_date": parse_datetime_field(coin.get("atl_date")),
+            "last_updated_coingecko": parse_datetime_field(coin.get("last_updated")),
             "created_at": created_at
         }
         rows_to_insert.append(row)
@@ -136,8 +147,13 @@ def fetch_coingecko_data(page, max_retries=3, retry_delay=30):
     returns: response_data <dict> JSON response data from Coingecko API
     '''
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
-    headers = {'x_cg_pro_api_key': coingecko_api_key}
-    url = f'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&page={page}'
+
+    url = f'https://pro-api.coingecko.com/api/v3/coins/markets?vs_currency=usd&per_page=250&page={page}'
+
+    headers = {
+        "accept": "application/json",
+        "x-cg-pro-api-key": coingecko_api_key
+    }
 
     for attempt in range(max_retries):
         response = requests.get(url, headers=headers, timeout=30)
@@ -149,4 +165,3 @@ def fetch_coingecko_data(page, max_retries=3, retry_delay=30):
             time.sleep(retry_delay)
         else:
             return response_data
-

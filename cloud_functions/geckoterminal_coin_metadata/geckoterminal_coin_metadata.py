@@ -30,6 +30,7 @@ is logged in BigQuery.
 """
 import time
 import datetime
+import os
 import logging
 import json
 import requests
@@ -66,6 +67,8 @@ def retrieve_geckoterminal_metadata(request):  # pylint: disable=unused-argument
         and cgi.coin_id is null -- removes coins that have already been searched for
         group by 1, 2, 3
     '''
+    # Retrieve paid Coingecko API key if available
+    coingecko_api_key = os.getenv('COINGECKO_API_KEY')
 
     update_queue_df = dgc().run_sql(query_sql)
     logger.info('coins to update: %s', str(update_queue_df.shape[0]))
@@ -76,12 +79,13 @@ def retrieve_geckoterminal_metadata(request):  # pylint: disable=unused-argument
         address = row['address']
         coin_id = row['coin_id']
 
-        logger.info('Initiating geckoterminal metadata search for <%s:%s>', blockchain, address)
+        logger.debug('Initiating geckoterminal metadata search for <%s:%s>', blockchain, address)
         # Pass the storage and bigquery clients to the search function
         geckoterminal_metadata_search(blockchain, address, coin_id, storage_client, bigquery_client)
 
-        logger.info('Pausing to avoid geckoterminal API rate limit issues...')
-        time.sleep(5)
+        if not coingecko_api_key:
+            logger.info('Pausing to avoid geckoterminal API rate limit issues...')
+            time.sleep(5)
 
     return "Geckoterminal metadata update completed."
 
@@ -173,6 +177,9 @@ def ping_geckoterminal_api(blockchain, address, max_retries=3, retry_delay=30, i
     Supports the main token endpoint and the info endpoint based on the info parameter.
     Retries the call if a rate limit error (429) is encountered.
 
+    If a Coingecko API key is available, the function will call the paid coingecko /onchain/
+    endpoints. If it isn't, the free Geckoterminal endpoints will be used.
+
     param: blockchain <string> this must match chain_text_geckoterminal from core.chains
     param: address <string> token contract address
     param: max_retries <int> number of times to retry on 429 error
@@ -180,12 +187,26 @@ def ping_geckoterminal_api(blockchain, address, max_retries=3, retry_delay=30, i
     param: info <bool> whether to call the /info endpoint or the main token endpoint
     returns: tuple(response_data, status_code) JSON response data and API status code
     '''
-    # Use the appropriate URL based on the info parameter
-    base_url = f'https://api.geckoterminal.com/api/v2/networks/{blockchain}/tokens/{address}'
+    coingecko_api_key = os.getenv('COINGECKO_API_KEY')
+
+    # If there's a paid coingecko api key, use that
+    if coingecko_api_key:
+        base_url = f"https://pro-api.coingecko.com/api/v3/onchain/networks/{blockchain}/tokens/{address}"
+        headers = {
+            "accept": "application/json",
+            "x-cg-pro-api-key": coingecko_api_key
+        }
+
+    # if there isn't a paid coingecko api key, use the free geckoterminal endpoint
+    else:
+        base_url = f'https://api.geckoterminal.com/api/v2/networks/{blockchain}/tokens/{address}'
+        headers = {}
+
+    # Modify the endpoint to retrieve the info data if specified
     url = f'{base_url}/info' if info else base_url
 
     for attempt in range(max_retries):
-        response = requests.get(url, timeout=30)
+        response = requests.get(url, headers=headers, timeout=30)
         try:
             response_data = json.loads(response.text)
         except json.JSONDecodeError:
@@ -196,7 +217,7 @@ def ping_geckoterminal_api(blockchain, address, max_retries=3, retry_delay=30, i
         # Retry if rate limit is exceeded
         if status_code == 429:
             logging.info("Rate limit exceeded, retrying in %d seconds... (Attempt %d of %d)",
-                         retry_delay, attempt + 1, max_retries)
+                            retry_delay, attempt + 1, max_retries)
             time.sleep(retry_delay)
         else:
             return response_data, status_code

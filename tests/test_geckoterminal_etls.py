@@ -107,6 +107,7 @@ def test_ping_geckoterminal_api_successful(mock_get, api_params, mock_successful
     # Verify that the API was called only once (no retries)
     mock_get.assert_called_once_with(
         f"https://api.geckoterminal.com/api/v2/networks/{api_params['blockchain']}/tokens/{api_params['address']}",
+        headers={},
         timeout=30
     )
 @pytest.fixture

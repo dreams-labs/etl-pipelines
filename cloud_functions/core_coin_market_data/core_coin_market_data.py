@@ -52,23 +52,8 @@ def retrieve_raw_market_data():
             ,md.price
             ,md.volume
 
-            -- use fdv if market cap data isn't available
-            ,case
-                when md.market_cap > 0 then md.market_cap
-                else cast(md.price*co.total_supply as int64)
-                end as market_cap
-
-            -- calculate fdv using total supply
-            ,cast(md.price*co.total_supply as int64) as fdv
-
-            -- calculate circulating supply using market cap
-            ,case
-                when md.market_cap > 0 then cast(md.market_cap/md.price as int64)
-                else cast(co.total_supply as int64)
-                end as circulating_supply
-
-            -- total supply retrieved from coingecko metadata tables
-            ,cast(co.total_supply as int64) as total_supply
+            -- imputed market cap data is unreliable so just trust coingecko to validate
+            ,md.market_cap
 
             ,'coingecko' as data_source
             ,md.updated_at
@@ -82,17 +67,8 @@ def retrieve_raw_market_data():
             ,cast(md.close as bignumeric) as price
             ,cast(md.volume as int64) as volume
 
-            -- geckoterminal doesn't provide market cap so use fdv as as market cap
-            ,cast(md.close*co.total_supply as int64) as market_cap
-
-            -- calculate fdv using total supply
-            ,cast(md.close*co.total_supply as int64) as fdv
-
-            -- geckoterminal doesn't provide circulating supply so use total supply
-            ,cast(co.total_supply as int64) as circulating_supply
-
             -- total supply retrieved from coingecko metadata tables
-            ,cast(co.total_supply as int64) as total_supply
+            ,co.total_supply as total_supply
 
             ,'geckoterminal' as data_source
             ,md.updated_at
@@ -187,8 +163,8 @@ def fill_market_data_gaps(market_data_df):
         too large to fill.
     """
 
-    # Confirm there are no null values in the input df
-    if market_data_df.isna().sum().sum() > 0:
+    # Confirm there are no null values in the primary market data columns
+    if market_data_df[['date','price','volume']].isna().sum().sum() > 0:
         raise ValueError("Market data df contains null values")
 
     # Define the max date that all coins will be filled through
@@ -241,9 +217,6 @@ def fill_market_data_gaps(market_data_df):
         coin_df['price'] = coin_df['price'].ffill()
         coin_df['volume'] = coin_df['volume'].fillna(0)
         coin_df['market_cap'] = coin_df['market_cap'].ffill()
-        coin_df['fdv'] = coin_df['fdv'].ffill()
-        coin_df['circulating_supply'] = coin_df['circulating_supply'].ffill()
-        coin_df['total_supply'] = coin_df['total_supply'].ffill()
         coin_df['data_source'] = coin_df['data_source'].ffill()
         # coin_df['updated_at'] is left with nulls for imputed records
         # coin_df['days_imputed'] is left as a data lineage tool
@@ -285,9 +258,6 @@ def upload_market_data_filled(market_data_filled_df):
     market_data_filled_df['price'] = market_data_filled_df['price'].astype(float)
     market_data_filled_df['volume'] = market_data_filled_df['volume'].astype('int64')
     market_data_filled_df['market_cap'] = market_data_filled_df['market_cap'].astype('int64')
-    market_data_filled_df['fdv'] = market_data_filled_df['fdv'].astype('int64')
-    market_data_filled_df['circulating_supply'] = market_data_filled_df['circulating_supply'].astype('int64')
-    market_data_filled_df['total_supply'] = market_data_filled_df['total_supply'].astype('int64')
     market_data_filled_df['data_source'] = market_data_filled_df['data_source'].astype(str)
     market_data_filled_df['updated_at'] = pd.to_datetime(market_data_filled_df['updated_at'])
     market_data_filled_df['days_imputed'] = market_data_filled_df['days_imputed'].astype(float)
@@ -299,9 +269,6 @@ def upload_market_data_filled(market_data_filled_df):
         {'name': 'price', 'type': 'FLOAT'},
         {'name': 'volume', 'type': 'INTEGER'},
         {'name': 'market_cap', 'type': 'INTEGER'},
-        {'name': 'fdv', 'type': 'INTEGER'},
-        {'name': 'circulating_supply', 'type': 'INTEGER'},
-        {'name': 'total_supply', 'type': 'INTEGER'},
         {'name': 'data_source', 'type': 'STRING'},
         {'name': 'updated_at', 'type': 'DATETIME'},
         {'name': 'days_imputed', 'type': 'FLOAT'}
