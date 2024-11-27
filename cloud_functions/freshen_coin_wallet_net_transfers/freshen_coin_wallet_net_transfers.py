@@ -110,9 +110,6 @@ def update_dune_freshness_table():
             -- new coins currently need decimal data to run the dune queries
             and c.decimals is not null
 
-            -- chain filter to help dune queries go faster by only querying one chain
-            and ch.chain_text_dune = 'bnb'
-
             -- max market cap is used to prioritize smaller coins with lower credit cost
             order by cap_size.max_market_cap asc
             -- limit 20
@@ -126,10 +123,13 @@ def update_dune_freshness_table():
             -- select * from existing_records
             -- union all
             select * from new_records
+            -- limit 25
         )
 
         -- all eth transfers are handled from bigquery public data
         where chain <> 'ethereum'
+        and chain <> 'solana'
+
 
         -- do not update solana tokens with negative wallets per dune data
         -- source: https://dune.com/queries/4094516
@@ -146,24 +146,27 @@ def update_dune_freshness_table():
             ,'DcUoGUeNTLhhzyrcz49LE7z3MEFwca2N9uSw1xbVi1gm'
             ,'5LafQUrVco6o7KMz42eqVEJ9LW31StPyGjeeu5sKoMtA'
         )
-        and token_address in (
-            '0x77d547256a2cd95f32f67ae0313e450ac200648d'
-            ,'0x529c79f6918665ebe250f32eeeaa1d410a0798c6'
-            ,'0x30842a9c941d9de3af582c41ad12b11d776ba69e'
-            ,'0x8899ec96ed8c96b5c86c23c3f069c3def75b6d97'
-            ,'0x5f78f4bfcb2b43bc174fe16a69a13945cefa2978'
-            ,'0x6f51a1674befdd77f7ab1246b83adb9f13613762'
-            ,'0xaa9e582e5751d703f85912903bacaddfed26484c'
-            ,'0x19ae49b9f38dd836317363839a5f6bfbfa7e319a'
-            ,'0x9ec02756a559700d8d9e79ece56809f7bcc5dc27'
-            ,'0xa73164db271931cf952cbaeff9e8f5817b42fa5c'
-            ,'0xbb2826ab03b6321e170f0558804f2b6488c98775'
-            ,'0x617cab4aaae1f8dfb3ee138698330776a1e1b324'
-            ,'0xd06716e1ff2e492cc5034c2e81805562dd3b45fa'
-            ,'0xd6fdde76b8c1c45b33790cc8751d5b88984c44ec'
-            ,'0xcc6f1e1b87cfcbe9221808d2d85c501aab0b5192'
-            ,'0x818835503f55283cd51a4399f595e295a9338753'
-        )
+        -- and token_address in (
+        --     '0x77d547256a2cd95f32f67ae0313e450ac200648d'
+        --     ,'0x529c79f6918665ebe250f32eeeaa1d410a0798c6'
+        --     ,'0x30842a9c941d9de3af582c41ad12b11d776ba69e'
+        --     ,'0x8899ec96ed8c96b5c86c23c3f069c3def75b6d97'
+        --     ,'0x5f78f4bfcb2b43bc174fe16a69a13945cefa2978'
+        --     ,'0x6f51a1674befdd77f7ab1246b83adb9f13613762'
+        --     ,'0xaa9e582e5751d703f85912903bacaddfed26484c'
+        --     ,'0x19ae49b9f38dd836317363839a5f6bfbfa7e319a'
+        --     ,'0x9ec02756a559700d8d9e79ece56809f7bcc5dc27'
+        --     ,'0xa73164db271931cf952cbaeff9e8f5817b42fa5c'
+        --     ,'0xbb2826ab03b6321e170f0558804f2b6488c98775'
+        --     ,'0x617cab4aaae1f8dfb3ee138698330776a1e1b324'
+        --     ,'0xd06716e1ff2e492cc5034c2e81805562dd3b45fa'
+        --     ,'0xd6fdde76b8c1c45b33790cc8751d5b88984c44ec'
+        --     ,'0xcc6f1e1b87cfcbe9221808d2d85c501aab0b5192'
+        --     ,'0x818835503f55283cd51a4399f595e295a9338753'
+        -- )
+        and freshest_date < DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 2 DAY)
+        order by rand()
+
     '''
     freshness_df = dgc().run_sql(query_sql)
     logger.info('retrieved freshness data for %s tokens', freshness_df.shape[0])
@@ -376,15 +379,33 @@ def generate_net_transfers_update_query(dune_chains):
         )
         '''
 
-    query_ctes = sol_query
-    query_selects = 'select * from solana'
+    # Define strings that will become queries
+    query_ctes = None
+    query_selects = None
 
+    # Solana blockchain query logic
+    if 'solana' in dune_chains:
+        query_ctes = sol_query
+        query_selects = 'select * from solana'
+
+    # ERC20 blockchain query logic
     for chain_text_dune in dune_chains:
+
+        # Solana is not ERC20
         if chain_text_dune=='solana':
             continue
-        query_ctes = ''.join([query_ctes,erc20_query(chain_text_dune)])
+
+        # The first queries shouldn't have a UNION appended to them
+        if not query_ctes:
+            query_ctes = f'with {erc20_query(chain_text_dune)}'
+            query_selects = f'select * from {chain_text_dune}'
+            continue
+
+        # Add the blockchain to the list of CTEs and select statements
+        query_ctes = '\n,'.join([query_ctes,erc20_query(chain_text_dune)])
         query_selects = '\nunion all\n'.join([query_selects,f'select * from {chain_text_dune}'])
 
+    # Combine CTEs and select statements into one big query
     full_query = query_ctes+query_selects
     logger.info('generated full query.')
 
