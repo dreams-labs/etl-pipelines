@@ -89,7 +89,8 @@ def set_coin_batches(batch_size):
     batch_count_df = dgc().run_sql(query_sql)
     batch_count = batch_count_df['total_batches'][0]
 
-    logger.info("Assigned coins to batches of %s in temp.temp_coin_batches.", batch_size)
+    logger.info("Assigned coins to %s batches of %s in temp.temp_coin_batches.",
+                batch_count, batch_size)
 
     return batch_count
 
