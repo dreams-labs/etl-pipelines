@@ -272,11 +272,6 @@ def rebuild_core_coin_wallet_transfers():
                 from coin_wallet_transfers_draft cwt
                 join core.coins c on c.coin_id = cwt.coin_id
                     and cwt.balance > c.total_supply
-
-                -- this was the only relevant coin I saw in the filter, the total supply
-                -- decreased dramatically because of the BEAM migration so there are many
-                -- overages when checked vs current total supply
-                where c.coingecko_id <> 'merit-circle'
                 group by 1,2,3
             ),
 
