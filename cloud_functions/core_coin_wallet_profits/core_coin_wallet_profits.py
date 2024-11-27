@@ -12,55 +12,86 @@ import pandas_gbq
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
+# pylint: disable=W1203  # no f strings in logs
+
 # set up logger at the module level
 logger = dc.setup_logger()
 
 @functions_framework.http
-def update_core_coin_wallet_profits(batch_number=None):  # pylint: disable=W0613
+def update_core_coin_wallet_profits(request):
     """
-    runs all functions in sequence to refresh core.coin_wallet_profits
+    Processes a single batch of coin wallet profits calculations.
+
+    Parameters:
+    - request (flask.Request): Should contain a JSON body with 'batch_number'
+
+    Returns:
+    - Tuple of (response_body, http_status_code)
     """
     start_time = time.time()
 
-    # Retrieve transfers and prices data
-    transfers_df, wallet_address_mapping = retrieve_transfers_data(batch_number)
-    prices_df = retrieve_prices_df(batch_number)
-    logger.info('<1> Retrieved transfers and prices data  (%.2f seconds).',
-                time.time() - start_time)
-    step_time = time.time()
+    try:
+        # Extract batch number from request
+        request_json = request.get_json()
+        if not request_json or 'batch_number' not in request_json:
+            return '{"error": "batch_number is required in request body"}', 400
 
-    # Calculate basic profitability data from transfers and prices, then clear memory
-    profits_df = merge_prices_and_transfers(transfers_df, prices_df)
-    profits_df = add_first_price_info(profits_df,prices_df)
-    del transfers_df,prices_df
-    gc.collect()
-    logger.info('<2> Merged transfers and prices data after (%.2f seconds).',
-                time.time() - step_time)
-    step_time = time.time()
+        batch_number = request_json['batch_number']
+        logger.info("Processing batch number %s...", batch_number)
 
-    # Append new records to accomodate transfer history without price data
-    imputed_records = create_imputed_records(profits_df)
-    profits_df = append_imputed_records(profits_df, imputed_records)
-    profits_df = filter_pre_inflow_records(profits_df)
-    logger.info('<3> Imputed and filtered records to align wallet and price timing (%.2f seconds).',
-                time.time() - step_time)
-    step_time = time.time()
+        # Retrieve transfers and prices data
+        transfers_df, wallet_address_mapping = retrieve_transfers_data(batch_number)
+        prices_df = retrieve_prices_df(batch_number)
+        logger.info('<1> Retrieved transfers and prices data  (%.2f seconds).',
+                    time.time() - start_time)
+        step_time = time.time()
 
-    # Calculate USD profitability metrics
-    profits_df = calculate_wallet_profitability(profits_df)
-    logger.info('<4> Calculated wallet proftability (%.2f seconds).',
-                time.time() - step_time)
-    step_time = time.time()
+        # Calculate basic profitability data from transfers and prices, then clear memory
+        profits_df = merge_prices_and_transfers(transfers_df, prices_df)
+        profits_df = add_first_price_info(profits_df,prices_df)
+        del transfers_df,prices_df
+        gc.collect()
+        logger.info('<2> Merged transfers and prices data after (%.2f seconds).',
+                    time.time() - step_time)
+        step_time = time.time()
+
+        # Append new records to accomodate transfer history without price data
+        imputed_records = create_imputed_records(profits_df)
+        profits_df = append_imputed_records(profits_df, imputed_records)
+        profits_df = filter_pre_inflow_records(profits_df)
+        logger.info('<3> Imputed and filtered records to align wallet and price timing (%.2f seconds).',
+                    time.time() - step_time)
+        step_time = time.time()
+
+        # Calculate USD profitability metrics
+        profits_df = calculate_wallet_profitability(profits_df)
+        logger.info('<4> Calculated wallet proftability (%.2f seconds).',
+                    time.time() - step_time)
+        step_time = time.time()
 
 
-    # Upload the df
-    profits_df['wallet_address'] = wallet_address_mapping[profits_df['wallet_address']]
-    upload_profits_data(profits_df, batch_number)
-    logger.info('<5> Uploaded profits data.  (%.2f seconds).',
-                time.time() - step_time)
+        # Upload the df
+        profits_df['wallet_address'] = wallet_address_mapping[profits_df['wallet_address']]
+        upload_profits_data(profits_df, batch_number)
+        logger.info('<5> Uploaded profits data.  (%.2f seconds).',
+                    time.time() - step_time)
 
-    return '{{"profits_df upload successful."}}'
+        total_time = time.time() - start_time
 
+        return {
+            "batch": batch_number,
+            "processing_time": total_time,
+            "rows_processed": len(profits_df)
+        }, 200
+
+    except Exception as e:
+        total_time = time.time() - start_time
+        logger.error(f"Error processing batch {batch_number}: {str(e)}")
+        return {
+            "batch": batch_number,
+            "processing_time": total_time,
+            "error": str(e)
+        }, 500
 
 
 def retrieve_transfers_data(batch_number=None):
