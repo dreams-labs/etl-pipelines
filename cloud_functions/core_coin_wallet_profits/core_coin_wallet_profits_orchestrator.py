@@ -2,6 +2,7 @@
 Cloud function that runs a query to refresh the data in bigquery table core.coin_wallet_profits
 through batch calculations that are stored as temp tables.
 """
+import concurrent.futures
 import functions_framework
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
@@ -19,22 +20,40 @@ def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0
     runs all functions in sequence to refresh core.coin_wallet_profits
 
     Params:
-    - request (flask.request): optionally should include the number of coins to be calculated
-        in each batch through the 'batch_size' param
+    - request (flask.request): optionally should include:
+        - batch_size: number of coins to be calculated in each batch
+        - max_workers: maximum number of concurrent threads (default: 4)
     """
     logger.info("Beginning rebuild sequence for core.coin_wallet_profits...")
 
+    # Drop any temp tables that still exist
+    drop_temp_tables()
+
     # 1. Assign coins to batches, with each batch including {batch_size} coins
-    batch_size = request.args.get('batch_size', 100)
+    batch_size = int(request.args.get('batch_size', 100))
+    max_workers = int(request.args.get('max_workers', 4))
     batch_count = set_coin_batches(batch_size)
 
-    # 2. Calculate coin_wallet_profits data for each batch
-    for batch in range(batch_count):
-        cwp.update_core_coin_wallet_profits(batch)
+    # 2. Calculate coin_wallet_profits data for each batch using multiple threads
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all batch calculations to the thread pool
+        future_to_batch = {
+            executor.submit(cwp.update_core_coin_wallet_profits, batch): batch
+            for batch in range(batch_count)
+        }
 
-    # 3. Rebuild core.coin_wallet_profits and drop the temp tables
+        # Wait for all threads to complete and handle any errors
+        for future in concurrent.futures.as_completed(future_to_batch):
+            batch = future_to_batch[future]
+            try:
+                future.result()
+            except Exception as e:
+                logger.error(f"Batch {batch} generated an exception: {str(e)}")
+                raise e
+
+    # 3. Rebuild core.coin_wallet_profits, optionally drop temp tables
     rebuild_core_table()
-    drop_temp_tables()
+    # drop_temp_tables() # disabled for now because they're useful for auditing data
 
     return '{{"rebuild of core.coin_wallet_profits complete."}}'
 
@@ -118,8 +137,8 @@ def rebuild_core_table():
 
     if completeness_df['missing_batches'][0] > 0:
         raise RuntimeError(
-            f"Batch generation incomplete: {completeness_df['missing_batches'][0]} batches "
-            "are missing. Aborting sequence.")
+            f"Batch generation incomplete: %s {completeness_df['missing_batches'][0]} batches "
+            "are missing. Aborting core.coin_wallet_profits update sequence.")
 
 
     # 2. Rebuild core.coin_wallet_profits
