@@ -227,6 +227,9 @@ def rebuild_core_coin_wallet_transfers():
                 and coin_exclusions_stables.coin_id is null
             ),
 
+
+            -- LOGIC TO REMOVE NEGATIVE BALANCE WALLETS AND COINS
+            -- --------------------------------------------------
             negative_wallets as (
             -- identify the minimum balance for each coin-wallet pair
                 select coin_id
@@ -250,12 +253,46 @@ def rebuild_core_coin_wallet_transfers():
                     group by 1,2
                 )
                 group by 1
+            ),
+
+
+            -- LOGIC TO REMOVE BALANCES OVER TOTAL SUPPLY
+            -- ------------------------------------------
+            -- These are caused by issues such as out of date total supply in core.coins,
+            -- bad total supply or decimals data in coingecko, bridged tokens having
+            -- fluctuating total supply, old contracts that have been migrated from,
+            -- and probably more causes.
+            -- This removes about 750 wallet addresses and 25 coins as of 11/27/24.
+            balance_overage_wallets as (
+                select cwt.coin_id
+                ,cwt.wallet_address
+                ,c.total_supply
+                ,max(cwt.balance) as highest_balance
+                from coin_wallet_transfers_draft cwt
+                join core.coins c on c.coin_id = cwt.coin_id
+                and cwt.balance > c.total_supply
+                group by 1,2,3
+            ),
+
+            balance_overage_coins as (
+                select coin_id
+                ,count(wallet_address) as overage_wallets
+                from balance_overage_wallets
+                group by 1
             )
 
             select cwt.*
             from coin_wallet_transfers_draft cwt
+
+            join negative_wallets nw on nw.coin_id = cwt.coin_id
+                and nw.wallet_address = cwt.wallet_address
             join negative_wallets_coins nwc on nwc.coin_id = cwt.coin_id
-            join negative_wallets nw on nw.coin_id = cwt.coin_id and nw.wallet_address = cwt.wallet_address
+
+            left join (
+                select wallet_address from balance_overage_wallets bow group by 1
+                ) bow on bow.wallet_address = cwt.wallet_address
+            left join balance_overage_coins boc on boc.coin_id = cwt.coin_id
+                and boc.overage_wallets >= 5
 
             -- exclude all coin-wallet pairs with negative balances
             and nw.lowest_balance > -0.1
@@ -265,6 +302,11 @@ def rebuild_core_coin_wallet_transfers():
             -- that haven't been excluded, etc
             where nwc.negative_wallets < 10
 
+            -- exclude wallet addresses that have ever had any balance over total supply for any coin
+            and bow.wallet_address is null
+
+            -- exclude all coins that have ever had 5+ wallets over total supply
+            and boc.coin_id is null
 
         );
 
