@@ -59,6 +59,16 @@ def retrieve_raw_market_data():
             ,md.updated_at
             from core.coins co
             join etl_pipelines.coin_market_data_coingecko md on md.coingecko_id = co.coingecko_id
+
+            -- these 3 coins have coingecko data where a few dates incorrectly show 0 prices
+            where not (
+                coin_id in (
+                    '61283234-0eb3-495b-9425-cad809aed532',
+                    '1f0b5e96-ab24-4f10-974f-44c34d93e5a6',
+                    '4b5bf1f6-2f40-4b12-80a1-8ab34352aaf7'
+                )
+                and price = 0
+            )
         ),
 
         geckoterminal_market_data as (
@@ -67,7 +77,7 @@ def retrieve_raw_market_data():
             ,cast(md.close as bignumeric) as price
             ,cast(md.volume as int64) as volume
 
-            -- total supply retrieved from coingecko metadata tables
+            -- core.coins total supply from the coingecko metadata tables
             ,co.total_supply as total_supply
 
             ,'geckoterminal' as data_source
@@ -128,10 +138,22 @@ def remove_single_day_dips(df, price_col='price', dip_threshold=0.8, recovery_th
     df['next_price'] = df.groupby('coin_id', observed=True)[price_col].shift(-1)
 
     # Identify single-day dips
-    dip_mask = (
+    # Case 1: Significant percentage drop followed by recovery
+    percentage_dip_mask = (
         (df[price_col] / df['prev_price'] < dip_threshold) &
         (df['next_price'] / df['prev_price'] > recovery_threshold)
     )
+
+    # Case 2: Zero value price with non-zero prices before and after
+    zero_price_mask = (
+        (df[price_col] == 0) &
+        (df['prev_price'] > 0) &
+        (df['next_price'] > 0) &
+        (df['next_price'] / df['prev_price'] > recovery_threshold)
+    )
+
+    # Combine both conditions
+    dip_mask = percentage_dip_mask | zero_price_mask
 
     # Count the number of dips removed
     num_dips_removed = dip_mask.sum()
@@ -240,6 +262,20 @@ def fill_market_data_gaps(market_data_df):
     # remove timezone for consistent joins
     market_data_filled_df['date'] = market_data_filled_df['date'].dt.tz_localize(None)
 
+
+    # Fix negative volume in coingecko data data
+    # ------------------------------------------
+    # Addresses negative volume values in 2019 data for these two coin_ids
+    coin_ids_to_update = ['12c7e173-35f7-4636-a8bc-a9cd0b55d8e9', '347bed7d-5fbf-4f93-8f2b-427846ef2c36']
+
+    # Apply changes conditionally
+    market_data_filled_df.loc[
+        market_data_filled_df['coin_id'].isin(coin_ids_to_update), 'volume'
+    ] = market_data_filled_df.loc[
+        market_data_filled_df['coin_id'].isin(coin_ids_to_update), 'volume'
+    ].abs()
+
+
     return market_data_filled_df
 
 
@@ -251,6 +287,7 @@ def upload_market_data_filled(market_data_filled_df):
     Parameters:
         market_data_filled_df (DataFrame): The DataFrame containing the market data to upload.
     """
+
     # Apply explicit typecasts
     # pylint: disable=C0301
     market_data_filled_df['date'] = pd.to_datetime(market_data_filled_df['date'])
