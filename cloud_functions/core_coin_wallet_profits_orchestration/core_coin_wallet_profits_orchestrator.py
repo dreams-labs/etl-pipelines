@@ -182,6 +182,9 @@ def rebuild_core_table():
 
     1. Confirms that all of the temp batch tables are completed
     2. Rebuilds core.coin_wallet_profits by unioning them all together
+       while excluding specific wallet_address-coin_id combinations that
+       have wallet values higher than coin market caps, the vast majority
+       of which are deployers, bridges, or other outliers.
 
     Params: None
     Returns: None
@@ -199,9 +202,9 @@ def rebuild_core_table():
 
     if completeness_df['missing_batches'][0] > 0:
         raise RuntimeError(
-            f"Batch generation incomplete: %s {completeness_df['missing_batches'][0]} batches "
-            "are missing. Aborting core.coin_wallet_profits update sequence.")
-
+            f"Batch generation incomplete: {completeness_df['missing_batches'][0]} batches "
+            "are missing. Aborting core.coin_wallet_profits update sequence."
+        )
 
     # 2. Rebuild core.coin_wallet_profits
     rebuild_cwp_sql = '''
@@ -221,13 +224,51 @@ def rebuild_core_table():
             CREATE OR REPLACE TABLE `core.coin_wallet_profits`
             PARTITION BY DATE(date)
             CLUSTER BY coin_id, wallet_address
-            AS
-            %s
+            AS (
+                WITH draft_table AS (
+                    SELECT *
+                    FROM (%s)
+                ),
+
+                overage_wallets as (
+                    SELECT coin_id, wallet_address
+                    FROM (
+                        -- Subquery to identify overage wallet combinations
+                        WITH overage_wallets AS (
+                            SELECT cwp.coin_id, cwp.wallet_address
+                            FROM draft_table cwp
+                            JOIN core.coin_market_data cmd
+                            ON cmd.coin_id = cwp.coin_id AND cmd.date = cwp.date
+                            WHERE cwp.usd_balance > cmd.market_cap
+                            AND cmd.market_cap > 0
+                            GROUP BY 1, 2
+                        ),
+                        overage_coins AS (
+                            SELECT coin_id, COUNT(wallet_address) AS total_wallets
+                            FROM overage_wallets
+                            GROUP BY 1
+                        )
+                        SELECT ow.coin_id, ow.wallet_address
+                        FROM overage_coins oc
+                        JOIN overage_wallets ow ON ow.coin_id = oc.coin_id
+                        -- more than 20 overage wallets usually indicates bad market cap data
+                        WHERE oc.total_wallets <= 20
+                    )
+                )
+
+                SELECT t.*
+                FROM draft_table t
+                LEFT JOIN overage_wallets ow
+                    ON ow.coin_id = t.coin_id
+                    AND ow.wallet_address = t.wallet_address
+                WHERE ow.wallet_address is null
+            )
         """, union_query);
         '''
 
     _ = dgc().run_sql(rebuild_cwp_sql)
     logger.info("Successfully rebuilt core.coin_wallet_profits.")
+
 
 
 def drop_temp_tables():
