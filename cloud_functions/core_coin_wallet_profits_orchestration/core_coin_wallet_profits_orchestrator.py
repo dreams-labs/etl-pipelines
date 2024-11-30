@@ -97,6 +97,7 @@ def set_coin_batches(batch_size):
         CAST(NULL AS STRING) as batch_table
         FROM
         numbered_coins
+        limit 30
         ORDER BY
         batch_number, coin_id;
 
