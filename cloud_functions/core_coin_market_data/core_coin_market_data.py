@@ -59,6 +59,16 @@ def retrieve_raw_market_data():
             ,md.updated_at
             from core.coins co
             join etl_pipelines.coin_market_data_coingecko md on md.coingecko_id = co.coingecko_id
+
+            -- these 3 coins have coingecko data where a few dates incorrectly show 0 prices
+            where not (
+                coin_id in (
+                    '61283234-0eb3-495b-9425-cad809aed532',
+                    '1f0b5e96-ab24-4f10-974f-44c34d93e5a6',
+                    '4b5bf1f6-2f40-4b12-80a1-8ab34352aaf7'
+                )
+                and price = 0
+            )
         ),
 
         geckoterminal_market_data as (
@@ -67,7 +77,7 @@ def retrieve_raw_market_data():
             ,cast(md.close as bignumeric) as price
             ,cast(md.volume as int64) as volume
 
-            -- total supply retrieved from coingecko metadata tables
+            -- core.coins total supply from the coingecko metadata tables
             ,co.total_supply as total_supply
 
             ,'geckoterminal' as data_source
