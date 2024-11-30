@@ -240,10 +240,19 @@ def fill_market_data_gaps(market_data_df):
     # remove timezone for consistent joins
     market_data_filled_df['date'] = market_data_filled_df['date'].dt.tz_localize(None)
 
-    # addresses negative values in 2019 data for for coin_ids
-        # 12c7e173-35f7-4636-a8bc-a9cd0b55d8e9
-        # 347bed7d-5fbf-4f93-8f2b-427846ef2c36
-    market_data_filled_df['volume'] = market_data_filled_df['volume'].abs()
+
+    # Fix negative volume in coingecko data data
+    # ------------------------------------------
+    # Addresses negative volume values in 2019 data for these two coin_ids
+    coin_ids_to_update = ['12c7e173-35f7-4636-a8bc-a9cd0b55d8e9', '347bed7d-5fbf-4f93-8f2b-427846ef2c36']
+
+    # Apply changes conditionally
+    market_data_filled_df.loc[
+        market_data_filled_df['coin_id'].isin(coin_ids_to_update), 'volume'
+    ] = market_data_filled_df.loc[
+        market_data_filled_df['coin_id'].isin(coin_ids_to_update), 'volume'
+    ].abs()
+
 
     return market_data_filled_df
 
