@@ -251,6 +251,12 @@ def upload_market_data_filled(market_data_filled_df):
     Parameters:
         market_data_filled_df (DataFrame): The DataFrame containing the market data to upload.
     """
+
+    # address negative values in 2019 data for for coin_ids
+        # 12c7e173-35f7-4636-a8bc-a9cd0b55d8e9
+        # 347bed7d-5fbf-4f93-8f2b-427846ef2c36
+    market_data_filled_df['volume'] = market_data_filled_df['volume'].abs()
+
     # Apply explicit typecasts
     # pylint: disable=C0301
     market_data_filled_df['date'] = pd.to_datetime(market_data_filled_df['date'])
