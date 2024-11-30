@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import functions_framework
 import pandas_gbq
+
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
@@ -32,10 +33,10 @@ def update_core_coin_wallet_profits(request):
 
     try:
         # Extract batch number from request
-        batch_number = int(request.args.get('batch_number'))
-        if not batch_number:
-            return '{"error": "batch_number is required in request body"}', 400
-
+        request_json = request.get_json()
+        if not request_json or 'batch_number' not in request_json:
+            return {"error": "batch_number is required in request body"}, 400
+        batch_number = request_json['batch_number']
         logger.info("Processing batch number %s...", batch_number)
 
         # Retrieve transfers and prices data

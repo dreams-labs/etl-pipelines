@@ -2,17 +2,22 @@
 Cloud function that runs a query to refresh the data in bigquery table core.coin_wallet_profits
 through batch calculations that are stored as temp tables.
 """
+import os
 import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
+import requests
 import functions_framework
+import google.auth
+import google.oauth2.id_token
+from google.oauth2 import service_account
+from google.auth.transport.requests import AuthorizedSession
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
-# import local package
-import core_coin_wallet_profits as cwp
+# pylint: disable=W1203  # no f strings in logs
 
 # set up logger at the module level
 logger = dc.setup_logger()
-
 
 @functions_framework.http
 def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0613
@@ -34,28 +39,84 @@ def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0
     max_workers = int(request.args.get('max_workers', 4))
     batch_count = set_coin_batches(batch_size)
 
+
     # 2. Calculate coin_wallet_profits data for each batch using multiple threads
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        # Submit all batch calculations to the thread pool
+    worker_url = "https://core-coin-wallet-profits-954736581165.us-west1.run.app"
+    session = get_auth_session(worker_url)
+    failed_batches = []
+
+    def process_single_batch(batch, session):
+        logger.info("Initiating profits calculations for batch %s...", batch)
+        response = session.post(worker_url, json={"batch_number": batch})
+        if response.status_code != 200:
+            raise Exception(f"Batch {batch} failed: {response.json().get('error')}")
+        logger.info("Completed profits calculations for batch %s.", batch)
+
+        return response.json()
+
+    # Sequence to initiate multithreaded function calls for multiple batches at once
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_batch = {
-            executor.submit(cwp.update_core_coin_wallet_profits, batch): batch
+            executor.submit(process_single_batch, batch, session): batch
             for batch in range(batch_count)
         }
 
-        # Wait for all threads to complete and handle any errors
         for future in concurrent.futures.as_completed(future_to_batch):
             batch = future_to_batch[future]
             try:
-                future.result()
+                result = future.result()
+                logger.info(f"Completed batch {result['batch']}")
             except Exception as e:
-                logger.error(f"Batch {batch} generated an exception: {str(e)}")
-                raise e
+                logger.error(str(e))
+                failed_batches.append(batch)
+
+    if failed_batches:
+        raise RuntimeError(f"Failed batches: {failed_batches}")
 
     # 3. Rebuild core.coin_wallet_profits, optionally drop temp tables
     rebuild_core_table()
     # drop_temp_tables() # disabled for now because they're useful for auditing data
 
     return '{{"rebuild of core.coin_wallet_profits complete."}}'
+
+
+
+def get_auth_session(target_url):
+    """
+    Creates an authenticated session that works both locally and in Cloud Run.
+
+    Args:
+        target_url (str): The URL of the target Cloud Run service
+
+    Returns:
+        requests.Session: An authenticated session
+    """
+    # Check if running locally (with service account key file)
+    if os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
+        # Local development with service account key
+        credentials = service_account.IDTokenCredentials.from_service_account_file(
+            os.getenv('GOOGLE_APPLICATION_CREDENTIALS'),
+            target_audience=target_url
+        )
+        return AuthorizedSession(credentials)
+
+    # Running in Cloud Run or GCP environment
+    else:
+        # Create a regular session
+        session = requests.Session()
+
+        # Get ID token for authentication
+        auth_req = google.auth.transport.requests.Request()
+        id_token = google.oauth2.id_token.fetch_id_token(auth_req, target_url)
+
+        # Add the ID token to the session's headers
+        session.headers.update({
+            'Authorization': f'Bearer {id_token}',
+            'Content-Type': 'application/json'
+        })
+
+        return session
+
 
 
 def set_coin_batches(batch_size):
@@ -97,9 +158,10 @@ def set_coin_batches(batch_size):
         CAST(NULL AS STRING) as batch_table
         FROM
         numbered_coins
-        limit 30
         ORDER BY
-        batch_number, coin_id;
+        batch_number, coin_id
+        limit 5
+        ;
 
         -- Query to get the number of batches (useful for our orchestrator)
         SELECT MAX(batch_number) + 1 AS total_batches FROM `temp.temp_coin_batches`;
@@ -171,28 +233,37 @@ def rebuild_core_table():
 
 def drop_temp_tables():
     """
-    Drops all temp tables from the core.coin_wallet_profits rebuild pipeline.
-
-    Params: None
-    Returns: None
+    Safely drops temp tables from core.coin_wallet_profits rebuild pipeline.
+    Handles cases where tables don't exist.
     """
     logger.debug("Dropping temp tables from core.coin_wallet_profits pipeline...")
 
-    # Retrieve list of temp tables
-    temp_tables_sql = """
-        select batch_table
-        from temp.temp_coin_batches
-        group by 1
+    try:
+        # Check if temp_coin_batches exists
+        check_sql = """
+            SELECT table_name
+            FROM `temp.INFORMATION_SCHEMA.TABLES`
+            WHERE table_name = 'temp_coin_batches'
         """
-    temp_tables = dgc().run_sql(temp_tables_sql)['batch_table']
+        exists_df = dgc().run_sql(check_sql)
 
-    # Drop the batch tables
-    for table in temp_tables:
-        drop_temp_sql = f"drop table `{table}`;"
-        _ = dgc().run_sql(drop_temp_sql)
+        if not exists_df.empty:
+            # Get and drop batch tables
+            temp_tables_sql = """
+                select distinct batch_table
+                from temp.temp_coin_batches
+                where batch_table is not null
+            """
+            temp_tables = dgc().run_sql(temp_tables_sql)['batch_table']
 
-    # Drop the batch assignment table
-    drop_temp_sql = "drop table `temp.temp_coin_batches`"
-    _ = dgc().run_sql(drop_temp_sql)
+            for table in temp_tables:
+                drop_temp_sql = f"drop table if exists `{table}`"
+                _ = dgc().run_sql(drop_temp_sql)
 
-    logger.info("Successfully dropped temp tables from core.coin_wallet_profits pipeline.")
+            # Drop the batch assignment table
+            _ = dgc().run_sql("drop table if exists `temp.temp_coin_batches`")
+
+        logger.info("Successfully dropped temp tables.")
+
+    except Exception as e:
+        logger.warning(f"Error dropping temp tables: {str(e)}")
