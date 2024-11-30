@@ -128,10 +128,22 @@ def remove_single_day_dips(df, price_col='price', dip_threshold=0.8, recovery_th
     df['next_price'] = df.groupby('coin_id', observed=True)[price_col].shift(-1)
 
     # Identify single-day dips
-    dip_mask = (
+    # Case 1: Significant percentage drop followed by recovery
+    percentage_dip_mask = (
         (df[price_col] / df['prev_price'] < dip_threshold) &
         (df['next_price'] / df['prev_price'] > recovery_threshold)
     )
+
+    # Case 2: Zero value price with non-zero prices before and after
+    zero_price_mask = (
+        (df[price_col] == 0) &
+        (df['prev_price'] > 0) &
+        (df['next_price'] > 0) &
+        (df['next_price'] / df['prev_price'] > recovery_threshold)
+    )
+
+    # Combine both conditions
+    dip_mask = percentage_dip_mask | zero_price_mask
 
     # Count the number of dips removed
     num_dips_removed = dip_mask.sum()
