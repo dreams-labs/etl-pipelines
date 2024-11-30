@@ -160,7 +160,6 @@ def set_coin_batches(batch_size):
         numbered_coins
         ORDER BY
         batch_number, coin_id
-        limit 5
         ;
 
         -- Query to get the number of batches (useful for our orchestrator)
