@@ -13,7 +13,7 @@ import pandas as pd
 import requests
 import pandas_gbq
 import functions_framework
-from google.cloud import bigquery
+from google.cloud import bigquery, exceptions
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
@@ -119,24 +119,22 @@ def retrieve_updates_df():
         left join `etl_pipelines.coin_market_data_coingecko_search_logs` sl on sl.coingecko_id = cds.coingecko_id
             and sl.created_at = cds.most_recent_search
         left join `etl_pipelines.coin_market_data_coingecko` cmd on cmd.coingecko_id = cds.coingecko_id
-        where (
-            -- criteria 1: only search if there isn't market data from the last 2 days
-            (
-                cds.most_recent_market_data is null
-                or (cds.most_recent_market_data) < (current_date('UTC') - 2)
-            )
 
-            -- criteria 2: only search if there's no prior searches
-            -- or if recent searches returned valid new records
-            AND (
-                cds.most_recent_search is null
-                OR (
-                      cds.most_recent_search > (current_date('UTC') - 2)
-                      AND sl.new_records > 0
-                    )
-            )
+        -- criteria 1: only search if there isn't market data from the last 2 days
+        where (
+            cds.most_recent_market_data is null
+            or (cds.most_recent_market_data) < (current_date('UTC') - 2)
         )
-        -- has never had 404 code
+
+        -- criteria 2: only search if there's no prior/recent searches
+        and (
+            -- include if there aren't any past searches
+            cds.most_recent_search is null
+            -- include if the last search was over 2 days ago
+            OR cds.most_recent_search < (current_date('UTC') - 2)
+        )
+
+        -- criteria 3: exclude if it has ever returned a 404 code
         and cds.has_404_code = 0
         group by 1,2
         '''
@@ -179,8 +177,18 @@ def process_coin_batch(coin_batch_df, client):
 
             log_market_data_search(client, coingecko_id, api_status_code, api_market_df, new_row_count)
 
-        except Exception as e:
-            logger.error(f"Error processing {coingecko_id}: {str(e)}")
+
+        except requests.RequestException as e:
+            logger.error(f"API request failed for {coingecko_id}: {str(e)}")
+            continue
+        except ValueError as e:
+            logger.error(f"Data formatting error for {coingecko_id}: {str(e)}")
+            continue
+        except pd.errors.DataError as e:
+            logger.error(f"DataFrame operation error for {coingecko_id}: {str(e)}")
+            continue
+        except KeyError as e:
+            logger.error(f"Missing key in API response for {coingecko_id}: {str(e)}")
             continue
 
     # After processing all coins in the batch, combine and upload the results
@@ -190,7 +198,7 @@ def process_coin_batch(coin_batch_df, client):
             upload_market_data(combined_market_df)
             logger.debug(f"Successfully uploaded batch data with {len(batch_market_data)} coins")
             return True
-        except Exception as upload_error:
+        except Exception as upload_error:  # pylint: disable=broad-except
             logger.error(f"Failed to upload batch data: {str(upload_error)}")
 
             # Store the failed batch in GCS and BigQuery
@@ -546,7 +554,11 @@ def log_failed_upload(combined_market_df):
             filename=filename
         )
         logger.info("Uploaded failed batch to GCS folder '%s' as %s.", gcs_folder, filename)
-    except Exception as e:
+    except exceptions.GoogleCloudError as gcs_error:
+        logger.error("Failed to upload failed batch to GCS due to cloud error: %s", gcs_error)
+    except IOError as io_error:
+        logger.error("Failed to upload failed batch to GCS due to file handling error: %s", io_error)
+    except Exception as e:  # pylint: disable=broad-except
         logger.error("Failed to upload failed batch to GCS: %s", e)
 
     # Define df to be uploaded to BigQuery
@@ -569,12 +581,21 @@ def log_failed_upload(combined_market_df):
         {'name':'failed_at', 'type': 'datetime'}
     ]
 
-    pandas_gbq.to_gbq(
-        upload_failures_df
-        ,table_name
-        ,project_id=project_id
-        ,if_exists='append'
-        ,table_schema=schema
-        ,progress_bar=False
-    )
-    logger.info('Appended coingecko_ids in failed batch to %s.', table_name)
+    try:
+        pandas_gbq.to_gbq(
+            upload_failures_df
+            ,table_name
+            ,project_id=project_id
+            ,if_exists='append'
+            ,table_schema=schema
+            ,progress_bar=False
+        )
+        logger.info('Appended coingecko_ids in failed batch to %s.', table_name)
+    except exceptions.GoogleCloudError as bq_error:
+        logger.error("Failed to log to BigQuery due to cloud error: %s", bq_error)
+    except pandas_gbq.gbq.GenericGBQException as gbq_error:
+        logger.error("Failed to log to BigQuery due to GBQ error: %s", gbq_error)
+    except IOError as io_error:
+        logger.error("Failed to log to BigQuery due to file handling error: %s", io_error)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error("Failed to log to BigQuery: %s", e)

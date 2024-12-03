@@ -52,8 +52,8 @@ def retrieve_raw_market_data():
             ,md.price
             ,md.volume
 
-            -- imputed market cap data is unreliable so just trust coingecko to validate
-            ,md.market_cap
+            -- include non-0 market cap values from coingecko
+            ,case when md.market_cap > 0 then md.market_cap end as market_cap
 
             ,'coingecko' as data_source
             ,md.updated_at
@@ -78,7 +78,7 @@ def retrieve_raw_market_data():
             ,cast(md.volume as int64) as volume
 
             -- core.coins total supply from the coingecko metadata tables
-            ,co.total_supply as total_supply
+            ,cast(null as int64) as market_cap
 
             ,'geckoterminal' as data_source
             ,md.updated_at
@@ -94,6 +94,7 @@ def retrieve_raw_market_data():
         select * from coingecko_market_data
         union all
         select * from geckoterminal_market_data
+
         """
 
     market_data_df = dgc().run_sql(query_sql)
