@@ -1,7 +1,7 @@
-'''
+"""
 cloud function that updates the bigquery table `etl_pipelines.coin_market_data_coingecko` by \
     making api calls to coingecko to get market data and uploading it
-'''
+"""
 import datetime
 import os
 import uuid
@@ -13,7 +13,7 @@ import pandas as pd
 import requests
 import pandas_gbq
 import functions_framework
-from google.cloud import bigquery
+from google.cloud import bigquery, exceptions
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
@@ -22,10 +22,12 @@ from dreams_core import core as dc
 # set up logger at the module level
 logger = dc.setup_logger()
 
+# suppress dreams_core.googlecloud info logs
+logging.getLogger('googlecloud').setLevel(logging.WARNING)
 
 @functions_framework.http
 def update_coin_market_data_coingecko(request):
-    '''
+    """
     Cloud function that updates the BigQuery table `etl_pipelines.coin_market_data_coingecko` by
     making concurrent API calls to CoinGecko to get market data and uploading it.
 
@@ -39,7 +41,7 @@ def update_coin_market_data_coingecko(request):
 
     Returns:
         str: JSON string with status and batch processing results
-    '''
+    """
     # Get parameters from request with defaults
     batch_size = int(request.args.get('batch_size', 100))
     max_workers = int(request.args.get('max_workers', 5))
@@ -92,15 +94,15 @@ def update_coin_market_data_coingecko(request):
 
 
 def retrieve_updates_df():
-    '''
+    """
     pulls a list of tokens with coingecko ids from bigquery, limiting to coins that either \
         have no market data or that have data at least 2 days old.
 
     returns:
         updates_df (dataframe): list of tokens that need price updates from coingecko
-    '''
+    """
 
-    query_sql = '''
+    query_sql = """
         with coingecko_data_status as (
             select cgi.coingecko_id
             ,max(sl.created_at) as most_recent_search
@@ -119,27 +121,25 @@ def retrieve_updates_df():
         left join `etl_pipelines.coin_market_data_coingecko_search_logs` sl on sl.coingecko_id = cds.coingecko_id
             and sl.created_at = cds.most_recent_search
         left join `etl_pipelines.coin_market_data_coingecko` cmd on cmd.coingecko_id = cds.coingecko_id
-        where (
-            -- criteria 1: only search if there isn't market data from the last 2 days
-            (
-                cds.most_recent_market_data is null
-                or (cds.most_recent_market_data) < (current_date('UTC') - 2)
-            )
 
-            -- criteria 2: only search if there's no prior searches
-            -- or if recent searches returned valid new records
-            AND (
-                cds.most_recent_search is null
-                OR (
-                      cds.most_recent_search > (current_date('UTC') - 2)
-                      AND sl.new_records > 0
-                    )
-            )
+        -- criteria 1: only search if there isn't market data from the last 2 days
+        where (
+            cds.most_recent_market_data is null
+            or (cds.most_recent_market_data) < (current_date('UTC') - 2)
         )
-        -- has never had 404 code
+
+        -- criteria 2: only search if there's no prior/recent searches
+        and (
+            -- include if there aren't any past searches
+            cds.most_recent_search is null
+            -- include if the last search was over 2 days ago
+            OR cds.most_recent_search < (current_date('UTC') - 2)
+        )
+
+        -- criteria 3: exclude if it has ever returned a 404 code
         and cds.has_404_code = 0
         group by 1,2
-        '''
+        """
 
     updates_df = dgc().run_sql(query_sql)
 
@@ -179,8 +179,18 @@ def process_coin_batch(coin_batch_df, client):
 
             log_market_data_search(client, coingecko_id, api_status_code, api_market_df, new_row_count)
 
-        except Exception as e:
-            logger.error(f"Error processing {coingecko_id}: {str(e)}")
+
+        except requests.RequestException as e:
+            logger.error(f"API request failed for {coingecko_id}: {str(e)}")
+            continue
+        except ValueError as e:
+            logger.error(f"Data formatting error for {coingecko_id}: {str(e)}")
+            continue
+        except pd.errors.DataError as e:
+            logger.error(f"DataFrame operation error for {coingecko_id}: {str(e)}")
+            continue
+        except KeyError as e:
+            logger.error(f"Missing key in API response for {coingecko_id}: {str(e)}")
             continue
 
     # After processing all coins in the batch, combine and upload the results
@@ -190,7 +200,7 @@ def process_coin_batch(coin_batch_df, client):
             upload_market_data(combined_market_df)
             logger.debug(f"Successfully uploaded batch data with {len(batch_market_data)} coins")
             return True
-        except Exception as upload_error:
+        except Exception as upload_error:  # pylint: disable=broad-except
             logger.error(f"Failed to upload batch data: {str(upload_error)}")
 
             # Store the failed batch in GCS and BigQuery
@@ -204,7 +214,7 @@ def process_coin_batch(coin_batch_df, client):
 
 
 def retrieve_coingecko_market_data(coingecko_id):
-    '''
+    """
     attempts to retrieve data from the coingecko api including error handling for various \
         coingecko api status codes
 
@@ -214,7 +224,7 @@ def retrieve_coingecko_market_data(coingecko_id):
     returns:
         market_df (dataframe): raw api response of market data
         api_status_code (int): status code of coingecko api call
-    '''
+    """
     retry_attempts = 3
 
     for _ in range(retry_attempts):
@@ -239,7 +249,7 @@ def retrieve_coingecko_market_data(coingecko_id):
 
 
 def strip_and_format_unixtime(unix_time):
-    '''
+    """
     converts a coingecko unix timestamp into a single date datetime. this includes logic that \
         assigns mid-day records to a single date
 
@@ -248,7 +258,7 @@ def strip_and_format_unixtime(unix_time):
 
     returns:
         formatted_datetime (datetime): datetime derived from the unix timestamp
-    '''
+    """
     # Convert the number to a string
     number_str = str(unix_time)
 
@@ -270,7 +280,7 @@ def strip_and_format_unixtime(unix_time):
 
 
 def replace_unix_timestamp(lst):
-    '''
+    """
     utility function to replace coingecko tuple responses with unix timestamps into datetimes
 
     params:
@@ -278,14 +288,14 @@ def replace_unix_timestamp(lst):
 
     returns:
         lst (datetime): datetime derived from the unix timestamp
-    '''
+    """
     lst[0] = strip_and_format_unixtime(lst[0])
     return lst
 
 
 
 def format_and_add_columns(df, coingecko_id, dates_with_records):
-    '''
+    """
     Converts json data from the coingecko api into a table-formatted dataframe by converting
     columns of tuples into standardized columns that match the bigquery table format.
 
@@ -298,7 +308,7 @@ def format_and_add_columns(df, coingecko_id, dates_with_records):
     returns:
         df (pandas.DataFrame): formatted df of market data
         new_row_count (int): how many rows were new data (used for logging)
-    '''
+    """
     # Loop through each row in the DataFrame and apply the function
     for index, row in df.iterrows():
         # Formatting unix timestamp of prices column
@@ -350,7 +360,7 @@ def format_and_add_columns(df, coingecko_id, dates_with_records):
 
 
 def ping_coingecko_api(coingecko_id):
-    '''
+    """
     requests market data for a given coingecko_id.
 
     note that no api key is used, as inputting a free plan api key in the headers causes the \
@@ -363,7 +373,7 @@ def ping_coingecko_api(coingecko_id):
     returns:
         df (dataframe): formatted df of market data
         status_code (int): status code of coingecko api call
-    '''
+    """
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
 
     url = f'https://pro-api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=2000&interval=daily' # pylint: disable=C0301
@@ -378,10 +388,7 @@ def ping_coingecko_api(coingecko_id):
     if r.status_code == 200:
         # upload the raw response to cloud storage
         filename = f"{coingecko_id}_{datetime.datetime.now(utc).strftime('%Y%m%d_%H%M')}.json"
-
-        logging.getLogger('dgc').setLevel(logging.WARNING)
         dgc().gcs_upload_file(data, gcs_folder='data_lake/coingecko_market_data', filename=filename)
-        logging.getLogger('dgc').setLevel(logging.INFO)
 
         # convert json blob to a dataframe
         df = pd.DataFrame(data)
@@ -393,7 +400,7 @@ def ping_coingecko_api(coingecko_id):
 
 
 def upload_market_data(market_df):
-    '''
+    """
     appends the market_df to the bigquery table etl_pipelines.coin_market_data_coingecko.
 
     steps:
@@ -406,7 +413,7 @@ def upload_market_data(market_df):
         transfers_df (pandas.DataFrame): df of token transfers
     returns:
         none
-    '''
+    """
     # Filter out records for the current UTC date
     current_utc_date = pd.Timestamp.now(tz='UTC').normalize()
     market_df = market_df[market_df['date'] < current_utc_date]
@@ -546,7 +553,11 @@ def log_failed_upload(combined_market_df):
             filename=filename
         )
         logger.info("Uploaded failed batch to GCS folder '%s' as %s.", gcs_folder, filename)
-    except Exception as e:
+    except exceptions.GoogleCloudError as gcs_error:
+        logger.error("Failed to upload failed batch to GCS due to cloud error: %s", gcs_error)
+    except IOError as io_error:
+        logger.error("Failed to upload failed batch to GCS due to file handling error: %s", io_error)
+    except Exception as e:  # pylint: disable=broad-except
         logger.error("Failed to upload failed batch to GCS: %s", e)
 
     # Define df to be uploaded to BigQuery
@@ -569,12 +580,21 @@ def log_failed_upload(combined_market_df):
         {'name':'failed_at', 'type': 'datetime'}
     ]
 
-    pandas_gbq.to_gbq(
-        upload_failures_df
-        ,table_name
-        ,project_id=project_id
-        ,if_exists='append'
-        ,table_schema=schema
-        ,progress_bar=False
-    )
-    logger.info('Appended coingecko_ids in failed batch to %s.', table_name)
+    try:
+        pandas_gbq.to_gbq(
+            upload_failures_df
+            ,table_name
+            ,project_id=project_id
+            ,if_exists='append'
+            ,table_schema=schema
+            ,progress_bar=False
+        )
+        logger.info('Appended coingecko_ids in failed batch to %s.', table_name)
+    except exceptions.GoogleCloudError as bq_error:
+        logger.error("Failed to log to BigQuery due to cloud error: %s", bq_error)
+    except pandas_gbq.gbq.GenericGBQException as gbq_error:
+        logger.error("Failed to log to BigQuery due to GBQ error: %s", gbq_error)
+    except IOError as io_error:
+        logger.error("Failed to log to BigQuery due to file handling error: %s", io_error)
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error("Failed to log to BigQuery: %s", e)
