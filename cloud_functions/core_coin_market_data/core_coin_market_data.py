@@ -290,12 +290,11 @@ def upload_market_data_filled(market_data_filled_df):
     """
 
     # Apply explicit typecasts
-    # pylint: disable=C0301
     market_data_filled_df['date'] = pd.to_datetime(market_data_filled_df['date'])
     market_data_filled_df['coin_id'] = market_data_filled_df['coin_id'].astype(str)
     market_data_filled_df['price'] = market_data_filled_df['price'].astype(float)
     market_data_filled_df['volume'] = market_data_filled_df['volume'].astype('int64')
-    market_data_filled_df['market_cap'] = market_data_filled_df['market_cap'].astype('int64')
+    market_data_filled_df['market_cap'] = market_data_filled_df['market_cap'].astype('Int64')
     market_data_filled_df['data_source'] = market_data_filled_df['data_source'].astype(str)
     market_data_filled_df['updated_at'] = pd.to_datetime(market_data_filled_df['updated_at'])
     market_data_filled_df['days_imputed'] = market_data_filled_df['days_imputed'].astype(float)
