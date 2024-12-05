@@ -35,7 +35,11 @@ def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts
         exclude_counts_sql = "and has_counts.contract_address is null"
 
     # retrieve freshness df
-    dune_chains_string = "','".join(dune_chains)
+    if dune_chains:
+        dune_chains_string = "','".join(dune_chains)
+        chain_filter_sql = f"where chain in ('{dune_chains_string}')"
+    else:
+        chain_filter_sql = ""
     query_sql = f"""
         with existing_records as (
             select chain_text_source as chain
@@ -53,15 +57,16 @@ def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts
             select ch.chain_text_dune as chain
             ,c.address as token_address
             ,c.decimals
+            ,volume.total_volume
             ,cast('2000-01-01' as datetime) as freshest_date
             from core.coins c
             join core.chains ch on ch.chain_id = c.chain_id
             join (
                 select coin_id
-                ,max(market_cap) as max_market_cap
-                from core.coin_market_data
+                ,sum(volume) as total_volume
+                from core.coin_market_data cmd
                 group by 1
-            ) cap_size on cap_size.coin_id = c.coin_id
+            ) volume on volume.coin_id = c.coin_id
             left join existing_records e on e.token_address = c.address
                 and e.chain = ch.chain_text_dune
             left join etl_pipelines.core_transfers_coin_exclusions coin_exclusions on coin_exclusions.coin_id = c.coin_id
@@ -100,9 +105,9 @@ def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts
         from (
             select * from new_records
         )
-        where chain in ('{dune_chains_string}')
+        {chain_filter_sql}
         -- where chain not in ('bnb','base','polygon','avalanche_c')
-        order by chain,token_address
+        order by total_volume asc
         limit {coin_limit}
     """
     new_coins_df = dgc().run_sql(query_sql)
