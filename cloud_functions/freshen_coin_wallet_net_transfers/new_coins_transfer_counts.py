@@ -1,19 +1,12 @@
 """
-provides updated whale chart data by following this sequence:
-1. updates the dune table net_transfers_state with the current state of the bigquery table \
-    etl_pipelines.coin_wallet_net_transfers
-2. generates a dune query for all blockchains in need of updates and unions them together
-3. retrieves the dune results and uploads them to bigquery
-
+Retrieves a count of how many wallet transfer days would need to be imported from Dune to
+add the coin's transfer records and stores them in etl_pipelines.dune_new_coin_transfer_counts.
 """
 import datetime
 import os
-import json
-import pandas as pd
 from dune_client.client import DuneClient
 from dune_client.query import QueryBase
 import pandas_gbq
-import functions_framework
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
@@ -21,14 +14,21 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 
-def load_new_coins_to_dune(dune_chains):
+def load_new_coins_to_dune(dune_chains, refresh_existing_counts=False):
     """
-    updates the dune table etl_net_transfers_freshness with all coins that don't have any
-    dune transfer records.
+    Updates the Dune table etl_new_erc20_coins with all coins that don't have any
+    Dune transfer records.
 
     Params:
     - dune_chains (list): a list that includes chain names that match Dune's terminology
+    - refresh_existing_counts (bool): whether to refresh transfer counts for coins that
+        already have records in etl_pipelines.dune_new_coin_transfer_counts
     """
+    if refresh_existing_counts:
+        exclude_counts_sql = "and has_counts.contract_address is null"
+    else:
+        exclude_counts_sql = ""
+
     # retrieve freshness df
     dune_chains_string = "','".join(dune_chains)
     query_sql = f"""
@@ -60,12 +60,20 @@ def load_new_coins_to_dune(dune_chains):
             left join existing_records e on e.token_address = c.address
                 and e.chain = ch.chain_text_dune
             left join etl_pipelines.core_transfers_coin_exclusions coin_exclusions on coin_exclusions.coin_id = c.coin_id
+            left join (
+                select chain
+                ,contract_address
+                from etl_pipelines.dune_new_coin_transfer_counts
+                group by 1,2
+             ) has_counts on has_counts.chain = ch.chain_text_dune
+                and has_counts.contract_address = c.address
 
             -- remove coin exclusions
             where coin_exclusions.coin_id is null
 
             -- all ethereum transfers are sourced from the public ethereum transfers table
-            and c.chain <> 'Ethereum'
+            -- Dune Solana data is suspect
+            and c.chain not in ('Ethereum','Solana')
 
             -- new coins don't have existing transfer data
             and e.token_address is null
@@ -76,9 +84,8 @@ def load_new_coins_to_dune(dune_chains):
             -- new coins currently need decimal data to run the dune queries
             and c.decimals is not null
 
-            -- max market cap is used to prioritize smaller coins with lower credit cost
-            order by cap_size.max_market_cap asc
-            -- limit 20
+            -- ignore coins that already have counts if configured to do so
+            {exclude_counts_sql}
         )
         select chain
         ,token_address
@@ -86,21 +93,7 @@ def load_new_coins_to_dune(dune_chains):
         from (
             select * from new_records
         )
-
-        -- all eth transfers are handled from bigquery public data
         where chain in ('{dune_chains_string}')
-        and token_address not in (
-            'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm'
-            ,'25hAyBQfoDhfWx9ay6rarbgvWGwDdNqcHsXS3jQ3mTDJ'
-            ,'FU1q8vJpZNUrmqsciSjp8bAKKidGsLmouB8CBdf8TKQv'
-            ,'5z3EqYQo9HiCEs3R84RCDMu2n7anpDMxRhdK8PSWmrRC'
-            ,'69kdRLyP5DTRkpHraaSZAQbWmAwzF9guKjZfzMXzcbAs'
-            ,'GtDZKAqvMZMnti46ZewMiXCa4oXF4bZxwQPoKzXPFxZn'
-            ,'52DfsNknorxogkjqecCTT3Vk2pUwZ3eMnsYKVm4z3yWy'
-            ,'BSHanq7NmdY6j8u5YE9A3SUygj1bhavFqb73vadspkL3'
-            ,'DcUoGUeNTLhhzyrcz49LE7z3MEFwca2N9uSw1xbVi1gm'
-            ,'5LafQUrVco6o7KMz42eqVEJ9LW31StPyGjeeu5sKoMtA'
-        )
         order by chain,token_address
     """
     new_coins_df = dgc().run_sql(query_sql)
@@ -259,7 +252,7 @@ def get_dune_transfer_counts(new_coins_query):
     transfer_counts_df = dune.run_query_dataframe(
         transfers_query,
         performance='large',
-        ping_frequency=10
+        ping_frequency=15
         )
     logger.info('Retrieved transfer counts for %s coins.', len(transfer_counts_df))
 
