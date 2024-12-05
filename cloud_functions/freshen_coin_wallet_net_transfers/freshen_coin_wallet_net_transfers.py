@@ -124,6 +124,7 @@ def retrieve_new_coin_freshness(dune_chains=None, batch_size=1000000):
             left join existing_records e on e.token_address = c.address
                 and e.chain = ch.chain_text_dune
             left join etl_pipelines.core_transfers_coin_exclusions coin_exclusions on coin_exclusions.coin_id = c.coin_id
+            left join etl_pipelines.stables_and_wraps_exclusions stables on stables.coin_id = c.coin_id
             left join (
                 select chain
                 ,contract_address
@@ -137,6 +138,7 @@ def retrieve_new_coin_freshness(dune_chains=None, batch_size=1000000):
 
             -- remove coin exclusions
             where coin_exclusions.coin_id is null
+            and stables.coin_id is null
 
             -- all ethereum transfers are sourced from the public ethereum transfers table
             -- do not update solana tokens with negative wallets per dune data
