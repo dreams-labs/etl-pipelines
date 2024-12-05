@@ -100,7 +100,7 @@ def retrieve_new_coins_list(dune_chains, refresh_existing_counts=False):
         where chain in ('{dune_chains_string}')
         -- where chain not in ('bnb','base','polygon','avalanche_c')
         order by chain,token_address
-        limit 250
+        limit 100
     """
     new_coins_df = dgc().run_sql(query_sql)
     logger.info('Retrieved metadata for %s tokens with no transfers data.', len(new_coins_df))

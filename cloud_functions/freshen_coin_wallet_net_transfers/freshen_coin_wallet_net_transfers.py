@@ -22,14 +22,14 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
-def freshen_coin_wallet_net_transfers(request):  # pylint: disable=W0613
+def freshen_existing_coin_wallet_net_transfers(request):  # pylint: disable=W0613
     """
     runs all functions in sequence to complete all update steps
     """
     logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
 
     # retrieve the list of coins that will be updated
-    freshness_df = retrieve_coin_freshness()
+    freshness_df = retrieve_existing_coin_freshness()
 
     # update the dune freshness table
     update_dune_freshness_table(freshness_df)
@@ -54,16 +54,53 @@ def freshen_coin_wallet_net_transfers(request):  # pylint: disable=W0613
     return "finished refreshing etl_pipelines.coin_wallet_net_transfers."
 
 
-def retrieve_coin_freshness():
+
+def retrieve_existing_coin_freshness():
     """
-    Retrieves a df containing the coins that will be updated based on the query criteria.
+    Retrieves a df containing the coins that have existing Dune transfers data.
+    """
+    # retrieve freshness df
+    query_sql = """
+        select chain_text_source as chain
+        ,token_address
+        ,decimals
+        ,max(date) as freshest_date
+        from etl_pipelines.coin_wallet_net_transfers
+        where data_source = 'dune'
+        -- all ethereum transfers are sourced from the public ethereum transfers table
+        and chain_text_source not in ('ethereum','solana')
+        group by 1,2,3
+        """
+    freshness_df = dgc().run_sql(query_sql)
+    logger.info('Retrieved freshness data for %s tokens with existing Dune data.',
+                len(freshness_df))
+
+    return freshness_df
+
+
+
+def retrieve_new_coin_freshness(dune_chains=None, batch_size=1000000):
+    """
+    Retrieves a df containing the coins that will have their full history retrieved from Dune.
+
+    Params:
+    - dune_chains (list): a list of blockchains that new coins will be added from, with chain
+        names that match Dune's terminology
+    - batch_size (int): how many new transfer records belonging to the new coins should be added.
+        the new coins will be added in the order of least new records to most.
 
     Returns:
     - freshness_df (pd.DataFrame): dataframe with info about the coins that will be queued
         for update
     """
+    if dune_chains:
+        dune_chains_string = "','".join(dune_chains)
+        chain_filter_sql = f"and ch.chain_text_dune in ('{dune_chains_string}')"
+    else:
+        chain_filter_sql = ""
+
     # retrieve freshness df
-    query_sql = """
+    query_sql = f"""
         with existing_records as (
             select chain_text_source as chain
             ,token_address
@@ -97,21 +134,27 @@ def retrieve_coin_freshness():
             ) transfer_counts on transfer_counts.chain = ch.chain_text_dune
                 and transfer_counts.contract_address = c.address
                 and transfer_counts.rn = 1
+
             -- remove coin exclusions
             where coin_exclusions.coin_id is null
+
             -- all ethereum transfers are sourced from the public ethereum transfers table
             -- do not update solana tokens with negative wallets per dune data
             -- source: https://dune.com/queries/4094516
             -- dune github ticket: https://github.com/duneanalytics/spellbook/issues/6690
             and c.chain not in ('Ethereum','Solana')
-            -- new coins don't have existing transfer data
+
+            -- remove coins with existing transfer data
             and e.token_address is null
-            -- new coins must have dune-supported blockchains
+
+            -- only include coins with dune-supported blockchains
             and ch.chain_text_dune is not null
-            -- new coins currently need decimal data to run the dune queries
+
+            -- coins currently need decimal data to run the dune queries
             and c.decimals is not null
-            -- blockchain filter
-            and ch.chain_text_dune in ('bnb','polygon','base','avalanche_c')
+
+            -- filter to only specific blockchains if instructed to
+            {chain_filter_sql}
         )
         select chain
         ,token_address
@@ -120,18 +163,10 @@ def retrieve_coin_freshness():
         ,current_timestamp() as updated_at
         ,transfer_records
         ,records_running_total
-        from (
-            -- select * from existing_records
-            -- where freshest_date < DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 2 DAY)
-            -- union all
-            select * from new_records
-            -- limit 25
-        )
-        -- permanently removed from Dune pipeline
-        where chain not in ('ethereum','solana')
+        from new_records
 
         -- custom filters
-        and records_running_total between 1 and 1000000
+        where records_running_total between 1 and {batch_size}
         order by transfer_records desc
         """
     freshness_df = dgc().run_sql(query_sql)
