@@ -95,6 +95,7 @@ def load_new_coins_to_dune(dune_chains, refresh_existing_counts=False):
         )
         where chain in ('{dune_chains_string}')
         order by chain,token_address
+        limit 300
     """
     new_coins_df = dgc().run_sql(query_sql)
     logger.info('Retrieved metadata for %s tokens with no transfers data.', len(new_coins_df))
