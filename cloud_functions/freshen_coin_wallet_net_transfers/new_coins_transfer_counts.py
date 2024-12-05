@@ -14,7 +14,7 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 
-def retrieve_new_coins_list(dune_chains, refresh_existing_counts=False):
+def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts=False):
     """
     Retrieves a list of coins that don't have any Dune transfer data. By default it
     won't queue up coins that have any existing transfer counts because the resulting
@@ -22,6 +22,7 @@ def retrieve_new_coins_list(dune_chains, refresh_existing_counts=False):
 
     Params:
     - dune_chains (list): a list that includes chain names that match Dune's terminology
+    - coin_limit (int): the maximum number of coins to refresh at once
     - refresh_existing_counts (bool): whether to refresh transfer counts for coins that
         already have records in etl_pipelines.dune_new_coin_transfer_counts
 
@@ -100,7 +101,7 @@ def retrieve_new_coins_list(dune_chains, refresh_existing_counts=False):
         where chain in ('{dune_chains_string}')
         -- where chain not in ('bnb','base','polygon','avalanche_c')
         order by chain,token_address
-        limit 100
+        limit {coin_limit}
     """
     new_coins_df = dgc().run_sql(query_sql)
     logger.info('Retrieved metadata for %s tokens with no transfers data.', len(new_coins_df))
@@ -271,7 +272,7 @@ def get_dune_transfer_counts(new_coins_query):
     transfer_counts_df = dune.run_query_dataframe(
         transfers_query,
         performance='large',
-        ping_frequency=15
+        ping_frequency=20
         )
     logger.info('Retrieved transfer counts for %s coins.', len(transfer_counts_df))
 
