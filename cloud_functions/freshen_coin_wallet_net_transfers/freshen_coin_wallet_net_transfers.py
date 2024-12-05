@@ -28,8 +28,11 @@ def freshen_coin_wallet_net_transfers(request):  # pylint: disable=W0613
     """
     logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
 
-    # update the dune table that tracks how fresh the data is
-    freshness_df = update_dune_freshness_table()
+    # retrieve the list of coins that will be updated
+    freshness_df = retrieve_coin_freshness()
+
+    # update the dune freshness table
+    update_dune_freshness_table(freshness_df)
 
     # generate the sql query needed to refresh the transfers table
     update_chains = freshness_df['chain'].unique()
@@ -51,18 +54,13 @@ def freshen_coin_wallet_net_transfers(request):  # pylint: disable=W0613
     return "finished refreshing etl_pipelines.coin_wallet_net_transfers."
 
 
-
-def update_dune_freshness_table():
+def retrieve_coin_freshness():
     """
-    updates the dune table etl_net_transfers_freshness with the current state of the bigquery table
-    etl_pipelines.coin_wallet_net_transfers.
+    Retrieves a df containing the coins that will be updated based on the query criteria.
 
-    the number of new records from core.coins that will be added to
-    etl_pipelines.coin_wallet_net_transfers is determined by the limit in the `new_records` CTE.
-
-    params: None
-    returns:
-        update_chains <array>: an array of all blockchains that need freshness updates
+    Returns:
+    - freshness_df (pd.DataFrame): dataframe with info about the coins that will be queued
+        for update
     """
     # retrieve freshness df
     query_sql = """
@@ -139,6 +137,18 @@ def update_dune_freshness_table():
     freshness_df = dgc().run_sql(query_sql)
     logger.info('retrieved freshness data for %s tokens', freshness_df.shape[0])
 
+    return freshness_df
+
+
+def update_dune_freshness_table(freshness_df):
+    """
+    updates the dune table etl_net_transfers_freshness with the current state of the bigquery table
+    etl_pipelines.coin_wallet_net_transfers.
+
+    Params
+    - freshness_df (pd.DataFrame): dataframe with info about the coins that will be queued
+        for update
+    """
     # store df locally as csv
     local_csv = 'net_transfers_freshness.csv'
     dune_df = freshness_df[['chain', 'token_address', 'freshest_date', 'updated_at']]
@@ -158,7 +168,6 @@ def update_dune_freshness_table():
     # remove local csv
     os.remove(local_csv)
 
-    return freshness_df
 
 
 def generate_net_transfers_update_query(dune_chains):

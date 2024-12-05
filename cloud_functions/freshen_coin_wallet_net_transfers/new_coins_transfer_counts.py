@@ -14,20 +14,24 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 
-def load_new_coins_to_dune(dune_chains, refresh_existing_counts=False):
+def retrieve_new_coins_list(dune_chains, refresh_existing_counts=False):
     """
-    Updates the Dune table etl_new_erc20_coins with all coins that don't have any
-    Dune transfer records.
+    Retrieves a list of coins that don't have any Dune transfer data. By default it
+    won't queue up coins that have any existing transfer counts because the resulting
+    query takes a long time to run on Dune.
 
     Params:
     - dune_chains (list): a list that includes chain names that match Dune's terminology
     - refresh_existing_counts (bool): whether to refresh transfer counts for coins that
         already have records in etl_pipelines.dune_new_coin_transfer_counts
+
+    Returns:
+    - new_coins_df (pd.DataFrame):
     """
     if refresh_existing_counts:
-        exclude_counts_sql = "and has_counts.contract_address is null"
-    else:
         exclude_counts_sql = ""
+    else:
+        exclude_counts_sql = "and has_counts.contract_address is null"
 
     # retrieve freshness df
     dune_chains_string = "','".join(dune_chains)
@@ -94,11 +98,27 @@ def load_new_coins_to_dune(dune_chains, refresh_existing_counts=False):
             select * from new_records
         )
         where chain in ('{dune_chains_string}')
+        -- where chain not in ('bnb','base','polygon','avalanche_c')
         order by chain,token_address
-        limit 300
+        limit 250
     """
     new_coins_df = dgc().run_sql(query_sql)
     logger.info('Retrieved metadata for %s tokens with no transfers data.', len(new_coins_df))
+
+    return new_coins_df
+
+
+
+def load_new_coins_to_dune(new_coins_df):
+    """
+    Updates the Dune table etl_new_erc20_coins with all coins that don't have any
+    Dune transfer records.
+
+    Params:
+    - dune_chains (list): a list that includes chain names that match Dune's terminology
+    - refresh_existing_counts (bool): whether to refresh transfer counts for coins that
+        already have records in etl_pipelines.dune_new_coin_transfer_counts
+    """
 
     # store df locally as csv
     local_csv = 'new_erc20_coins.csv'
@@ -117,8 +137,6 @@ def load_new_coins_to_dune(dune_chains, refresh_existing_counts=False):
 
     # remove local csv
     os.remove(local_csv)
-
-    return new_coins_df
 
 
 
