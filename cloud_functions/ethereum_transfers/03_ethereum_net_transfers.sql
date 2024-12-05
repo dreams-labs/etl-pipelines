@@ -12,6 +12,8 @@ WITH all_transfers as (
     SELECT * FROM ethereum_transfers.transfers_cohort_1_2024_0925
     UNION ALL
     SELECT * FROM ethereum_transfers.transfers_cohort_1_2024_1123
+    UNION ALL
+    SELECT * FROM ethereum_transfers.transfers_cohort_1_2024_1201
 
     UNION ALL
 
@@ -26,6 +28,8 @@ WITH all_transfers as (
     SELECT * FROM ethereum_transfers.transfers_cohort_2_2024_1007
     UNION ALL
     SELECT * FROM ethereum_transfers.transfers_cohort_2_2024_1123
+    UNION ALL
+    SELECT * FROM ethereum_transfers.transfers_cohort_2_2024_1201
 
     UNION ALL
 
@@ -38,6 +42,8 @@ WITH all_transfers as (
     SELECT * FROM ethereum_transfers.transfers_cohort_3_2023
     UNION ALL
     SELECT * FROM ethereum_transfers.transfers_cohort_3_2024_1123
+    UNION ALL
+    SELECT * FROM ethereum_transfers.transfers_cohort_3_2024_1201
 
     UNION ALL
 
@@ -50,6 +56,8 @@ WITH all_transfers as (
     SELECT * FROM ethereum_transfers.transfers_cohort_4_2023
     UNION ALL
     SELECT * FROM ethereum_transfers.transfers_cohort_4_2024_1123
+    UNION ALL
+    SELECT * FROM ethereum_transfers.transfers_cohort_4_2024_1201
 )
 
 SELECT t.date
