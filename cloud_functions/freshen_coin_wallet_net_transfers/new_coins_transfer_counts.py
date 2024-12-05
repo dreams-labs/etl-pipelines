@@ -65,6 +65,7 @@ def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts
             left join existing_records e on e.token_address = c.address
                 and e.chain = ch.chain_text_dune
             left join etl_pipelines.core_transfers_coin_exclusions coin_exclusions on coin_exclusions.coin_id = c.coin_id
+            left join etl_pipelines.stables_and_wraps_exclusions stables on stables.coin_id = c.coin_id
             left join (
                 select chain
                 ,contract_address
@@ -75,6 +76,7 @@ def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts
 
             -- remove coin exclusions
             where coin_exclusions.coin_id is null
+            and stables.coin_id is null
 
             -- all ethereum transfers are sourced from the public ethereum transfers table
             -- Dune Solana data is suspect
@@ -160,7 +162,7 @@ def generate_erc_20_counts_query(dune_chains):
             --  retrieving the most recent batch of bigquery records available in dune
             with new_coin_batch as (
                 select chain
-                ,token_address
+                ,from_hex(token_address) as token_address
                 ,updated_at
                 from (
                     select *
@@ -169,17 +171,18 @@ def generate_erc_20_counts_query(dune_chains):
                 )
                 where batch_recency = 1
             ),
-
             -- filter transfers on index column 'block_time' to improve performance
             transfers_filtered as (
                 select '{chain_text_dune}' as chain
                 ,t.evt_block_time as block_time
-                ,cast(t."from" as varchar) as from_token_account
-                ,cast(t."to" as varchar) as to_token_account
-                ,cast(t.contract_address as varchar) as token_mint_address
+                ,t."from" as from_token_account
+                ,t."to" as to_token_account
+                ,t.contract_address as token_mint_address
                 from erc20_{chain_text_dune}.evt_Transfer t
+                -- filter to only coins in the current batch
+                join new_coin_batch ts on ts.token_address = t.contract_address
                 -- remove rows from today since the daily net totals aren't finalized
-                where date_trunc('day', t.evt_block_time at time zone 'UTC') <
+                and date_trunc('day', t.evt_block_time at time zone 'UTC') <
                     date(current_timestamp at time zone 'UTC')
             ),
             transfers as (
@@ -188,9 +191,6 @@ def generate_erc_20_counts_query(dune_chains):
                 ,t.from_token_account as address
                 ,token_mint_address as contract_address
                 from transfers_filtered t
-                join new_coin_batch ts
-                    on ts.token_address = t.token_mint_address
-                    and ts.chain = t.chain
 
                 union all
 
@@ -199,9 +199,6 @@ def generate_erc_20_counts_query(dune_chains):
                 ,t.to_token_account as address
                 ,token_mint_address as contract_address
                 from transfers_filtered t
-                join new_coin_batch ts
-                    on ts.token_address = t.token_mint_address
-                    and ts.chain = t.chain
             ),
             daily_net_transfers as (
                 select chain
