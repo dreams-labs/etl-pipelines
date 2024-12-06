@@ -5,7 +5,7 @@ models:
   - name: coins
     description: "core.coins table"
     meta:
-      schema: core  # Documenting the dataset (core)
+      schema: core
     columns:
       - name: coin_id
         description: "Unique ID for each coin"
@@ -21,7 +21,7 @@ models:
   - name: coin_facts_metadata
     description: "aggregated metadata from all sources"
     meta:
-      schema: core  # Documenting the dataset (core)
+      schema: core
     columns:
       - name: coin_id
         description: "Unique ID for each coin"
@@ -40,7 +40,7 @@ models:
   - name: coin_facts_coingecko
     description: "metadata from coingecko only"
     meta:
-      schema: core  # Documenting the dataset (core)
+      schema: core
     columns:
       - name: coin_id
         description: "Unique ID for each coin"
@@ -152,7 +152,7 @@ models:
   - name: coin_geckoterminal_metadata
     description: "Metadata for Geckoterminal coins"
     meta:
-      schema: etl_pipelines  # Documenting the dataset (etl_pipelines)
+      schema: etl_pipelines
     columns:
       - name: geckoterminal_id
         description: "ID of geckoterminal coin"
@@ -186,7 +186,7 @@ models:
   - name: coin_coingecko_metadata
     description: "Metadata for Coingecko coins"
     meta:
-      schema: etl_pipelines  # Documenting the dataset (etl_pipelines)
+      schema: etl_pipelines
     columns:
       - name: coingecko_id
         description: "coingecko_id"
@@ -269,3 +269,20 @@ models:
             - date
             - token_address
             - wallet_address
+
+  # Reference Schema
+  - name: wallet_ids
+    description: "mapping from wallet_address strings to integer IDs"
+    meta:
+      schema: reference
+    columns:
+      - name: wallet_id
+        description: "ID assigned to wallet address"
+        data_tests:
+          - not_null
+          - unique
+      - name: wallet_address
+        description: "wallet address string"
+        data_tests:
+          - not_null
+          - unique
