@@ -1,11 +1,11 @@
-'''
+"""
 provides updated whale chart data by following this sequence:
 1. updates the dune table net_transfers_state with the current state of the bigquery table \
     etl_pipelines.coin_wallet_net_transfers
 2. generates a dune query for all blockchains in need of updates and unions them together
 3. retrieves the dune results and uploads them to bigquery
 
-'''
+"""
 import datetime
 import os
 import json
@@ -22,14 +22,17 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
-def freshen_coin_wallet_net_transfers(request):  # pylint: disable=W0613
-    '''
+def freshen_existing_coin_wallet_net_transfers(request):  # pylint: disable=W0613
+    """
     runs all functions in sequence to complete all update steps
-    '''
+    """
     logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
 
-    # update the dune table that tracks how fresh the data is
-    freshness_df = update_dune_freshness_table()
+    # retrieve the list of coins that will be updated
+    freshness_df = retrieve_existing_coin_freshness()
+
+    # update the dune freshness table
+    update_dune_freshness_table(freshness_df)
 
     # generate the sql query needed to refresh the transfers table
     update_chains = freshness_df['chain'].unique()
@@ -52,20 +55,52 @@ def freshen_coin_wallet_net_transfers(request):  # pylint: disable=W0613
 
 
 
-def update_dune_freshness_table():
-    '''
-    updates the dune table etl_net_transfers_freshness with the current state of the bigquery table
-    etl_pipelines.coin_wallet_net_transfers.
-
-    the number of new records from core.coins that will be added to
-    etl_pipelines.coin_wallet_net_transfers is determined by the limit in the `new_records` CTE.
-
-    params: None
-    returns:
-        update_chains <array>: an array of all blockchains that need freshness updates
-    '''
+def retrieve_existing_coin_freshness():
+    """
+    Retrieves a df containing the coins that have existing Dune transfers data.
+    """
     # retrieve freshness df
-    query_sql = '''
+    query_sql = """
+        select chain_text_source as chain
+        ,token_address
+        ,decimals
+        ,max(date) as freshest_date
+        from etl_pipelines.coin_wallet_net_transfers
+        where data_source = 'dune'
+        -- all ethereum transfers are sourced from the public ethereum transfers table
+        and chain_text_source not in ('ethereum','solana')
+        group by 1,2,3
+        """
+    freshness_df = dgc().run_sql(query_sql)
+    logger.info('Retrieved freshness data for %s tokens with existing Dune data.',
+                len(freshness_df))
+
+    return freshness_df
+
+
+
+def retrieve_new_coin_freshness(dune_chains=None, batch_size=1000000):
+    """
+    Retrieves a df containing the coins that will have their full history retrieved from Dune.
+
+    Params:
+    - dune_chains (list): a list of blockchains that new coins will be added from, with chain
+        names that match Dune's terminology
+    - batch_size (int): how many new transfer records belonging to the new coins should be added.
+        the new coins will be added in the order of least new records to most.
+
+    Returns:
+    - freshness_df (pd.DataFrame): dataframe with info about the coins that will be queued
+        for update
+    """
+    if dune_chains:
+        dune_chains_string = "','".join(dune_chains)
+        chain_filter_sql = f"and ch.chain_text_dune in ('{dune_chains_string}')"
+    else:
+        chain_filter_sql = ""
+
+    # retrieve freshness df
+    query_sql = f"""
         with existing_records as (
             select chain_text_source as chain
             ,token_address
@@ -73,7 +108,6 @@ def update_dune_freshness_table():
             ,max(date) as freshest_date
             from etl_pipelines.coin_wallet_net_transfers
             where data_source = 'dune'
-
             -- all ethereum transfers are sourced from the public ethereum transfers table
             and chain_text_source <> 'ethereum'
             group by 1,2,3
@@ -83,94 +117,75 @@ def update_dune_freshness_table():
             ,c.address as token_address
             ,c.decimals
             ,cast('2000-01-01' as datetime) as freshest_date
+            ,transfer_counts.transfer_records
+            ,sum(transfer_records) over (order by transfer_records asc) as records_running_total
             from core.coins c
             join core.chains ch on ch.chain_id = c.chain_id
-            join (
-                select coin_id
-                ,max(coalesce(market_cap,price*total_supply)) as max_market_cap
-                from core.coin_market_data
-                group by 1
-            ) cap_size on cap_size.coin_id = c.coin_id
             left join existing_records e on e.token_address = c.address
                 and e.chain = ch.chain_text_dune
             left join etl_pipelines.core_transfers_coin_exclusions coin_exclusions on coin_exclusions.coin_id = c.coin_id
+            left join etl_pipelines.stables_and_wraps_exclusions stables on stables.coin_id = c.coin_id
+            left join (
+                select chain
+                ,contract_address
+                ,transfer_records
+                ,row_number() over (partition by chain,contract_address order by updated_at desc) as rn
+                from etl_pipelines.dune_new_coin_transfer_counts
+                order by transfer_records
+            ) transfer_counts on transfer_counts.chain = ch.chain_text_dune
+                and transfer_counts.contract_address = c.address
+                and transfer_counts.rn = 1
 
             -- remove coin exclusions
             where coin_exclusions.coin_id is null
+            and stables.coin_id is null
 
             -- all ethereum transfers are sourced from the public ethereum transfers table
-            and c.chain <> 'Ethereum'
+            -- do not update solana tokens with negative wallets per dune data
+            -- source: https://dune.com/queries/4094516
+            -- dune github ticket: https://github.com/duneanalytics/spellbook/issues/6690
+            and c.chain not in ('Ethereum','Solana')
 
-            -- new coins don't have existing transfer data
+            -- remove coins with existing transfer data
             and e.token_address is null
 
-            -- new coins must have dune-supported blockchains
+            -- only include coins with dune-supported blockchains
             and ch.chain_text_dune is not null
 
-            -- new coins currently need decimal data to run the dune queries
+            -- coins currently need decimal data to run the dune queries
             and c.decimals is not null
 
-            -- max market cap is used to prioritize smaller coins with lower credit cost
-            order by cap_size.max_market_cap asc
-            -- limit 20
+            -- filter to only specific blockchains if instructed to
+            {chain_filter_sql}
         )
         select chain
         ,token_address
         ,decimals
         ,freshest_date
         ,current_timestamp() as updated_at
-        from (
-            -- select * from existing_records
-            -- union all
-            select * from new_records
-            -- limit 25
-        )
+        ,transfer_records
+        ,records_running_total
+        from new_records
 
-        -- all eth transfers are handled from bigquery public data
-        where chain <> 'ethereum'
-        and chain <> 'solana'
-
-
-        -- do not update solana tokens with negative wallets per dune data
-        -- source: https://dune.com/queries/4094516
-        -- dune github ticket: https://github.com/duneanalytics/spellbook/issues/6690
-        and token_address not in (
-            'EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm'
-            ,'25hAyBQfoDhfWx9ay6rarbgvWGwDdNqcHsXS3jQ3mTDJ'
-            ,'FU1q8vJpZNUrmqsciSjp8bAKKidGsLmouB8CBdf8TKQv'
-            ,'5z3EqYQo9HiCEs3R84RCDMu2n7anpDMxRhdK8PSWmrRC'
-            ,'69kdRLyP5DTRkpHraaSZAQbWmAwzF9guKjZfzMXzcbAs'
-            ,'GtDZKAqvMZMnti46ZewMiXCa4oXF4bZxwQPoKzXPFxZn'
-            ,'52DfsNknorxogkjqecCTT3Vk2pUwZ3eMnsYKVm4z3yWy'
-            ,'BSHanq7NmdY6j8u5YE9A3SUygj1bhavFqb73vadspkL3'
-            ,'DcUoGUeNTLhhzyrcz49LE7z3MEFwca2N9uSw1xbVi1gm'
-            ,'5LafQUrVco6o7KMz42eqVEJ9LW31StPyGjeeu5sKoMtA'
-        )
-        -- and token_address in (
-        --     '0x77d547256a2cd95f32f67ae0313e450ac200648d'
-        --     ,'0x529c79f6918665ebe250f32eeeaa1d410a0798c6'
-        --     ,'0x30842a9c941d9de3af582c41ad12b11d776ba69e'
-        --     ,'0x8899ec96ed8c96b5c86c23c3f069c3def75b6d97'
-        --     ,'0x5f78f4bfcb2b43bc174fe16a69a13945cefa2978'
-        --     ,'0x6f51a1674befdd77f7ab1246b83adb9f13613762'
-        --     ,'0xaa9e582e5751d703f85912903bacaddfed26484c'
-        --     ,'0x19ae49b9f38dd836317363839a5f6bfbfa7e319a'
-        --     ,'0x9ec02756a559700d8d9e79ece56809f7bcc5dc27'
-        --     ,'0xa73164db271931cf952cbaeff9e8f5817b42fa5c'
-        --     ,'0xbb2826ab03b6321e170f0558804f2b6488c98775'
-        --     ,'0x617cab4aaae1f8dfb3ee138698330776a1e1b324'
-        --     ,'0xd06716e1ff2e492cc5034c2e81805562dd3b45fa'
-        --     ,'0xd6fdde76b8c1c45b33790cc8751d5b88984c44ec'
-        --     ,'0xcc6f1e1b87cfcbe9221808d2d85c501aab0b5192'
-        --     ,'0x818835503f55283cd51a4399f595e295a9338753'
-        -- )
-        and freshest_date < DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 2 DAY)
-        order by rand()
-
-    '''
+        -- custom filters
+        where records_running_total between 1 and {batch_size}
+        order by transfer_records desc
+        """
     freshness_df = dgc().run_sql(query_sql)
     logger.info('retrieved freshness data for %s tokens', freshness_df.shape[0])
 
+    return freshness_df
+
+
+def update_dune_freshness_table(freshness_df):
+    """
+    updates the dune table etl_net_transfers_freshness with the current state of the bigquery table
+    etl_pipelines.coin_wallet_net_transfers.
+
+    Params
+    - freshness_df (pd.DataFrame): dataframe with info about the coins that will be queued
+        for update
+    """
     # store df locally as csv
     local_csv = 'net_transfers_freshness.csv'
     dune_df = freshness_df[['chain', 'token_address', 'freshest_date', 'updated_at']]
@@ -190,11 +205,10 @@ def update_dune_freshness_table():
     # remove local csv
     os.remove(local_csv)
 
-    return freshness_df
 
 
 def generate_net_transfers_update_query(dune_chains):
-    '''
+    """
     generates a long dune sql query that includes a separate CTE for each applicable blockchain \
     and unions them all together. the query will return all wallet-coin-days needed to fully \
     freshen the etl_pipelines.coin_wallet_net_transfers table in bigquery.
@@ -207,10 +221,10 @@ def generate_net_transfers_update_query(dune_chains):
 
     returns:
         full_query <str>: the long dune query that will generates the wallet-coin-day-transfers
-    '''
+    """
 
     # query to retrieve solana transfers (solana tables have different structure than erc20 tables)
-    sol_query = '''
+    sol_query = """
         with solana as (
             --  retrieving the most recent batch of bigquery records available in dune
             with current_net_transfers_freshness as (
@@ -291,12 +305,12 @@ def generate_net_transfers_update_query(dune_chains):
             from daily_net_transfers
             where amount <> 0 -- excludes wallet days with equal to/from transactions that net to 0
         )
-        '''
+        """
 
     # all erc20 tokens have identical table structures so this query can be repeated for each
     def erc20_query(chain_text_dune):
-        return f'''
-        ,{chain_text_dune} as (
+        return f"""
+        {chain_text_dune} as (
             --  retrieving the most recent batch of bigquery records available in dune
             with current_net_transfers_freshness as (
                 select chain
@@ -377,7 +391,7 @@ def generate_net_transfers_update_query(dune_chains):
             from daily_net_transfers
             where amount <> 0 -- excludes wallet days with equal to/from transactions that net to 0
         )
-        '''
+        """
 
     # Define strings that will become queries
     query_ctes = None
@@ -414,7 +428,7 @@ def generate_net_transfers_update_query(dune_chains):
 
 
 def get_fresh_dune_data(full_query):
-    '''
+    """
     runs the query in dune and retrieves the results as a df. note that decimal adjustments have \
     not yet been applied so the dune query values are not the same order of magnitude as the \
     bigquery values. the query may take >10 minutes to run as it retrieves transfers from \
@@ -424,7 +438,7 @@ def get_fresh_dune_data(full_query):
         full_query (str): sql query to run
     returns:
         transfers_json_df (json): raw dune query response containing one column with json objects
-    '''
+    """
     dune = DuneClient.from_env()
 
     # update the query with a version that includes all necessary blockchains
@@ -441,7 +455,7 @@ def get_fresh_dune_data(full_query):
     transfers_json_df = dune.run_query_dataframe(
         transfers_query,
         performance='large',
-        ping_frequency=10
+        ping_frequency=15
         )
     logger.info('fetched fresh dune data with %s rows.', len(transfers_json_df))
 
@@ -483,7 +497,7 @@ def parse_transfers_json(transfers_json_df):
 
 
 def append_to_bigquery_table(freshness_df,transfers_df):
-    '''
+    """
     uploads the new transfers data to bigquery to ensure the table is fully refreshed through
     the last full UTC day.
 
@@ -498,7 +512,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
         transfers_df (pandas.DataFrame): df of token transfers
     returns:
         none
-    '''
+    """
 
     # Check if transfers_df is empty and terminate upload process if so
     if transfers_df.empty:
@@ -569,7 +583,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
 
 
 # def create_dune_freshness_table():
-#     '''
+#     """
 #     this is the code that was used to create dune.dreamslabs.etl_net_transfers_freshness.
 #     it is not intended to be reran as part of normal operations but is retained in case it needs
 #     to be referenced or altered.
@@ -578,7 +592,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
 #         none
 #     returns:
 #         none
-#     '''
+#     """
 #     # make empty dune table
 #     dune = DuneClient.from_env()
 #

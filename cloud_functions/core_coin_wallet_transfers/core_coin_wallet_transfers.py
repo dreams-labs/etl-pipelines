@@ -1,6 +1,7 @@
-'''
-cloud function that runs a query to refresh the data in bigquery table core.coin_wallet_transfers
-'''
+"""
+Cloud function that runs a query to refresh the data in bigquery table core.coin_wallet_transfers
+using etl_pipelines.coin_wallet_net_transfers and etl_pipelines.ethereum_net_transfers.
+"""
 import datetime
 from pytz import utc
 import pandas as pd
@@ -14,15 +15,18 @@ logger = dc.setup_logger()
 
 @functions_framework.http
 def update_core_coin_wallet_transfers(request):  # pylint: disable=W0613
-    '''
+    """
     runs all functions in sequence to refresh core.coin_wallet_transfers
-    '''
+    """
     logger.info('updating coin and wallet exclusion tables...')
     # update list of addresses to be excluded from the core table
     update_wallet_exclusions_tables()
 
     # update list of coins to be excluded from the core table
     update_coin_exclusions_tables()
+
+    # check for dupes and raise an exception if there are
+    check_for_dupes()
 
     # rebuild core table
     logger.info('rebuilding table core.coin_wallet_transfers...')
@@ -44,7 +48,7 @@ def update_core_coin_wallet_transfers(request):  # pylint: disable=W0613
 
 
 def update_wallet_exclusions_tables():
-    '''
+    """
     this is a list of excluded wallet addresses and includes uniswap, burn/mint addresses,
     bridges, etc that result in negative balances and transaction bloat. this function
     refreshes the etl_pipelines.core_coin_wallet_transfers_exclusions bigquery table by ingesting
@@ -52,7 +56,7 @@ def update_wallet_exclusions_tables():
 
     exclusions are maintained in the 'core_coin_wallet_transfers_exclusions' tab of this sheet:
     https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135
-    '''
+    """
     # load the tab into a df
     df = dgc().read_google_sheet(
         '11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs',
@@ -71,14 +75,14 @@ def update_wallet_exclusions_tables():
 
 
 def update_coin_exclusions_tables():
-    '''
+    """
     this is a list of excluded coins, mostly based on excessive transfer counts. this function
     refreshes the etl_pipelines.core_wallet_transfers_coin_exclusions bigquery table by ingesting
     the underlying sheets data, formatting it, and uploading it to bigquery.
 
     exclusions are maintained in the 'core_transfers_coin_exclusions' tab of this sheet:
     https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135
-    '''
+    """
     # load the tab into a df
     df = dgc().read_google_sheet(
         '11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs',
@@ -96,16 +100,68 @@ def update_coin_exclusions_tables():
 
 
 
+def check_for_dupes():
+    """
+    Checks if there are any duplicate records for coin-wallet-date groupings in
+    any of the source tables used for the core transfers table.
+
+    Raises:
+    - ValueError if duplicate records are found in either table
+    """
+    dupes_sql = """
+        with dune_dupes as (
+            select chain_text_source
+            ,token_address
+            ,wallet_address
+            ,date
+            ,count(date) as dupes
+            ,max(data_updated_at) as recent_update
+            from etl_pipelines.coin_wallet_net_transfers
+            group by 1,2,3,4
+        )
+
+        ,eth_dupes as (
+            select date
+            ,token_address
+            ,wallet_address
+            ,count(date) as dupes
+            from etl_pipelines.ethereum_net_transfers
+            group by 1,2,3
+        )
+
+        select 'dune' as source
+        ,count(*) as dupes
+        from dune_dupes
+        where dupes > 1
+
+        union all
+
+        select 'ethereum' as source
+        ,count(*) as dupes
+        from eth_dupes
+        where dupes > 1
+
+        """
+    counts_df = dgc().run_sql(dupes_sql)
+
+    if counts_df['dupes'].sum() > 0:
+        dune_dupes = counts_df[counts_df['source']=='dune']['dupes'].iloc[0]
+        eth_dupes = counts_df[counts_df['source']=='ethereum']['dupes'].iloc[0]
+        raise ValueError(f"Dupes detected in source tables: {dune_dupes} in Dune and {eth_dupes} "
+                        "in Ethereum. Aborting rebuild of core.coin_wallet_transfers.")
+
+
+
 def rebuild_core_coin_wallet_transfers():
-    '''
+    """
     rebuilds core.coin_wallet_transfers based on the current records in both the dune transfers table
     and the ethereum_net_transfers table.
 
     returns:
         counts_df <df>: dataframe showing the number of rows in the core and etl transfers tables
-    '''
+    """
 
-    query_sql = '''
+    query_sql = """
         CREATE OR REPLACE TABLE core.coin_wallet_transfers
         PARTITION BY date(date)
         CLUSTER BY token_address AS (
@@ -328,7 +384,7 @@ def rebuild_core_coin_wallet_transfers():
         ,count(*)
         from etl_pipelines.ethereum_net_transfers
         ;
-        '''
+        """
 
     counts_df = dgc().run_sql(query_sql)
 

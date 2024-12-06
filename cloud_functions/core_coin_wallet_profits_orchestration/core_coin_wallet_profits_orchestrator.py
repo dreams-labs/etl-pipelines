@@ -11,6 +11,7 @@ import google.auth
 import google.oauth2.id_token
 from google.oauth2 import service_account
 from google.auth.transport.requests import AuthorizedSession
+from google.api_core import exceptions as google_exceptions
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
@@ -45,19 +46,10 @@ def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0
     session = get_auth_session(worker_url)
     failed_batches = []
 
-    def process_single_batch(batch, session):
-        logger.info("Initiating profits calculations for batch %s...", batch)
-        response = session.post(worker_url, json={"batch_number": batch})
-        if response.status_code != 200:
-            raise Exception(f"Batch {batch} failed: {response.json().get('error')}")
-        logger.info("Completed profits calculations for batch %s.", batch)
-
-        return response.json()
-
     # Sequence to initiate multithreaded function calls for multiple batches at once
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_batch = {
-            executor.submit(process_single_batch, batch, session): batch
+            executor.submit(process_single_batch, batch, session, worker_url): batch
             for batch in range(batch_count)
         }
 
@@ -66,8 +58,13 @@ def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0
             try:
                 result = future.result()
                 logger.info(f"Completed batch {result['batch']}")
-            except Exception as e:
-                logger.error(str(e))
+            except BatchProcessingError as e:
+                # Handle our custom batch processing errors
+                logger.error("Batch processing error: %s", str(e))
+                failed_batches.append(batch)
+            except Exception as e: # pylint:disable=W0718  # general exception catch
+                # Keep general handler for unexpected errors
+                logger.error("Unexpected error in batch %d: %s", batch, str(e))
                 failed_batches.append(batch)
 
     if failed_batches:
@@ -78,6 +75,30 @@ def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0
     # drop_temp_tables() # disabled for now because they're useful for auditing data
 
     return '{{"rebuild of core.coin_wallet_profits complete."}}'
+
+
+
+class BatchProcessingError(Exception):
+    """Custom exception for batch processing failures"""
+    pass  # pylint:disable=W0107  # unecessary pass
+
+def process_single_batch(batch, session, worker_url):
+    """Process a single batch of coin wallet profits calculations"""
+    logger.info("Initiating profits calculations for batch %s...", batch)
+    try:
+        response = session.post(worker_url, json={"batch_number": batch})
+        if response.status_code != 200:
+            error_msg = response.json().get('error', 'Unknown error')
+            raise BatchProcessingError(f"Batch {batch} failed with status {response.status_code}: {error_msg}")
+
+        logger.info("Completed profits calculations for batch %s.", batch)
+        return response.json()
+    except requests.RequestException as e:
+        # Handle network/connection errors
+        raise BatchProcessingError(f"Network error processing batch {batch}: {str(e)}") from e
+    except ValueError as e:
+        # Handle JSON decode errors
+        raise BatchProcessingError(f"Invalid JSON response for batch {batch}: {str(e)}") from e
 
 
 
@@ -305,5 +326,9 @@ def drop_temp_tables():
 
         logger.info("Successfully dropped temp tables.")
 
-    except Exception as e:
+    except google_exceptions.NotFound:
+        logger.warning("One or more tables not found during cleanup")
+    except google_exceptions.PermissionDenied as e:
+        logger.warning(f"Permission denied while dropping tables: {str(e)}")
+    except Exception as e: # pylint:disable=W0718  # general exception catch
         logger.warning(f"Error dropping temp tables: {str(e)}")
