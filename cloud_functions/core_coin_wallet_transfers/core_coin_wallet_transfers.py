@@ -43,6 +43,9 @@ def update_core_coin_wallet_transfers(request):  # pylint: disable=W0613
         core_count, etl_count
     )
 
+    # rebuild mapping reference table
+    create_mapping_table()
+
     return '{{"rebuild of core.coin_wallet_transfers complete."}}'
 
 
@@ -389,3 +392,26 @@ def rebuild_core_coin_wallet_transfers():
     counts_df = dgc().run_sql(query_sql)
 
     return counts_df
+
+
+def create_mapping_table():
+    """
+    Creates a reference table that maps each wallet_address to an integer. This is
+    useful in Python pipelines because the integers are much more memory efficient.
+    """
+
+    mapping_sql = """
+        create or replace table reference.wallet_integer_mappings
+        cluster by wallet_address
+        as (
+            select wallet_address,
+            DENSE_RANK() OVER (ORDER BY wallet_address) as wallet_mapping,
+            current_datetime('UTC')
+            from core.coin_wallet_transfers
+        )
+        ;
+        """
+
+    _ = dgc().run_sql(mapping_sql)
+
+    logger.info("Rebuilt reference.wallet_integer_mappings.")
