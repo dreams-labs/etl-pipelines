@@ -36,3 +36,5 @@ models:
       +schema: core  # Apply 'core' schema to models in 'core'
     etl_pipelines:
       +schema: etl_pipelines  # Apply 'etl_pipelines' schema to models in 'etl_pipelines'
+    reference:
+      +schema: reference
