@@ -268,18 +268,16 @@ def rebuild_core_coin_wallet_transfers():
 
                 -- wallet address exclusions
                 left join exclusion_wallet_addresses wallet_exclusions on wallet_exclusions.wallet_address = t.wallet_address
-                    and wallet_exclusions.chain_id = t.chain_id
+                left join core.coins contract_addresses on contract_addresses.address = t.wallet_address
 
                 -- token exclusions
                 left join etl_pipelines.ethereum_transfers_exclusions coin_exclusions_eth on coin_exclusions_eth.coin_id = t.coin_id
                 left join etl_pipelines.core_transfers_coin_exclusions coin_exclusions on coin_exclusions.coin_id = t.coin_id
                 left join etl_pipelines.stables_and_wraps_exclusions coin_exclusions_stables on coin_exclusions_stables.coin_id = t.coin_id
 
-                -- removes self custody contract transactions
-                where t.token_address <> t.wallet_address
-
                 -- remove the manually excluded addresses
                 and wallet_exclusions.wallet_address is null
+                and contract_addresses.address is null
 
                 -- remove coin exclusions
                 and coin_exclusions_eth.coin_id is null
