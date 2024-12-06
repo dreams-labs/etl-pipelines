@@ -406,9 +406,14 @@ def create_wallet_id_table():
         as (
             select wallet_address,
             DENSE_RANK() OVER (ORDER BY wallet_address) as wallet_id,
-            current_datetime('UTC')
-            from core.coin_wallet_transfers
+            current_datetime('UTC') as updated_at
+            from (
+                select wallet_address
+                from core.coin_wallet_transfers
+                group by 1
+            )
         )
+        ;
         """
 
     _ = dgc().run_sql(mapping_sql)
