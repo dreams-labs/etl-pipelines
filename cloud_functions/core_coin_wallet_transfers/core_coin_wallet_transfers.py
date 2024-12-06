@@ -401,15 +401,14 @@ def create_mapping_table():
     """
 
     mapping_sql = """
-        create or replace table reference.wallet_integer_mappings
+        create or replace table reference.wallet_ids
         cluster by wallet_address
         as (
             select wallet_address,
-            DENSE_RANK() OVER (ORDER BY wallet_address) as wallet_mapping,
+            DENSE_RANK() OVER (ORDER BY wallet_address) as wallet_id,
             current_datetime('UTC')
             from core.coin_wallet_transfers
         )
-        ;
         """
 
     _ = dgc().run_sql(mapping_sql)
