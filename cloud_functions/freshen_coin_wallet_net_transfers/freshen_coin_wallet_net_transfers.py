@@ -186,9 +186,12 @@ def update_dune_freshness_table(freshness_df):
     - freshness_df (pd.DataFrame): dataframe with info about the coins that will be queued
         for update
     """
-    # store df locally as csv
+    # define dune upload
+    dune_df = freshness_df[['chain', 'token_address', 'freshest_date']]
+    dune_df['updated_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # store df locally
     local_csv = 'net_transfers_freshness.csv'
-    dune_df = freshness_df[['chain', 'token_address', 'freshest_date', 'updated_at']]
     dune_df.to_csv(local_csv, index=False)
 
     # append the csv to dune
