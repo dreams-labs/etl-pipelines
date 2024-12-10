@@ -45,6 +45,7 @@ def update_coin_market_data_coingecko(request):
     # Get parameters from request with defaults
     batch_size = int(request.args.get('batch_size', 100))
     max_workers = int(request.args.get('max_workers', 5))
+    retry_recent_failures = request.args.get('retry_recent_failures', 5)
 
     logger.info(f'Starting update with batch_size={batch_size}, max_workers={max_workers}')
 

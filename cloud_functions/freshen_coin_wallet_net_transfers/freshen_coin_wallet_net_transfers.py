@@ -6,7 +6,7 @@ provides updated whale chart data by following this sequence:
 3. retrieves the dune results and uploads them to bigquery
 
 """
-import datetime
+from datetime import datetime, timezone
 import os
 import json
 import pandas as pd
@@ -188,7 +188,7 @@ def update_dune_freshness_table(freshness_df):
     """
     # define dune upload
     dune_df = freshness_df[['chain', 'token_address', 'freshest_date']]
-    dune_df['updated_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    dune_df['updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
     # store df locally
     local_csv = 'net_transfers_freshness.csv'
@@ -545,7 +545,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
     upload_df['wallet_address'] = transfers_df['wallet_address']
     upload_df['daily_net_transfers'] = transfers_df['daily_net_transfers']
     upload_df['data_source'] = 'dune'
-    upload_df['data_updated_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    upload_df['data_updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
     # set df datatypes of upload df
     dtype_mapping = {
