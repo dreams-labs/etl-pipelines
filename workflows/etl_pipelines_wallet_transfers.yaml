@@ -1,0 +1,33 @@
+# Workflow to update Ethereum and Dune etl_piplines wallet transfers data in parallel
+main:
+    steps:
+    - init:
+        assign:
+        - project: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+        - service_account: western-verve-411004@appspot.gserviceaccount.com
+
+    - retrieveWalletData:
+        parallel:
+            branches:
+            - ethereumTransfers:
+                steps:
+                - retrieveEthereumTransfers:
+                    call: http.get
+                    args:
+                        url: https://ethereum-transfers-updates-954736581165.us-west1.run.app
+                        auth:
+                            type: OIDC
+                        timeout: 1800
+
+            - duneTransfers:
+                steps:
+                - retrieveDuneTransfers:
+                    call: http.get
+                    args:
+                        url: https://dune-transfers-updates-954736581165.us-west1.run.app
+                        auth:
+                            type: OIDC
+                        timeout: 1800
+
+    - returnOutput:
+        return: 200

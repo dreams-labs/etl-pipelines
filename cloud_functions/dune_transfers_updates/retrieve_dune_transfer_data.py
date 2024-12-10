@@ -6,7 +6,7 @@ provides updated whale chart data by following this sequence:
 3. retrieves the dune results and uploads them to bigquery
 
 """
-import datetime
+from datetime import datetime, timezone
 import os
 import json
 import pandas as pd
@@ -28,31 +28,58 @@ def freshen_existing_coin_wallet_net_transfers(request):  # pylint: disable=W061
     """
     logger.info('initiating sequence to freshen etl_pipelines.coin_wallet_net_transfers...')
 
-    # retrieve the list of coins that will be updated
-    freshness_df = retrieve_existing_coin_freshness()
+    try:
+        # retrieve the list of coins that will be updated
+        freshness_df = retrieve_existing_coin_freshness()
 
-    # update the dune freshness table
-    update_dune_freshness_table(freshness_df)
+        # update the dune freshness table
+        update_dune_freshness_table(freshness_df)
 
-    # generate the sql query needed to refresh the transfers table
-    update_chains = freshness_df['chain'].unique()
-    full_query = generate_net_transfers_update_query(update_chains)
+        # generate the sql query needed to refresh the transfers table
+        update_chains = freshness_df['chain'].unique()
+        full_query = generate_net_transfers_update_query(update_chains)
 
-    # retrieve the fresh dune data using the generated query
-    transfers_json_df = get_fresh_dune_data(full_query)
+        # retrieve the fresh dune data using the generated query
+        transfers_json_df = get_fresh_dune_data(full_query)
 
-    # convert the json column into a df
-    transfers_df, parse_errors_df = parse_transfers_json(transfers_json_df)
-    # expand the json data into df columns
-    logger.info('completed translation from dune export json to dataframe.')
-    if not parse_errors_df.empty:
-        logger.info("JSON parse errors occurred for %s records. ", len(parse_errors_df))
+        # convert the json column into a df
+        transfers_df, parse_errors_df = parse_transfers_json(transfers_json_df)
+        logger.info('completed translation from dune export json to dataframe.')
 
-    # upload the fresh dune data to bigquery
-    append_to_bigquery_table(freshness_df,transfers_df)
+        # Track parse errors
+        parse_error_count = len(parse_errors_df) if not parse_errors_df.empty else 0
+        if parse_error_count > 0:
+            logger.info("JSON parse errors occurred for %s records. ", parse_error_count)
 
-    return "finished refreshing etl_pipelines.coin_wallet_net_transfers."
+        # upload the fresh dune data to bigquery
+        append_to_bigquery_table(freshness_df, transfers_df)
 
+        # Prepare return data
+        return {
+            "status": "success",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "processed": {
+                "chains": update_chains.tolist(),
+                "tokens_updated": len(freshness_df),
+                "total_transfers_processed": len(transfers_json_df),
+                "successful_transfers": len(transfers_df),
+                "failed_parse_count": parse_error_count
+            },
+            "execution_details": {
+                "freshest_date_by_chain": freshness_df.groupby('chain')['freshest_date'].max().to_dict(),
+                "records_with_parse_errors": parse_errors_df.to_dict('records') if not parse_errors_df.empty else []
+            }
+        }
+
+    except Exception as e:  # pylint: disable=broad-exception-caught
+        error_message = str(e)
+        logger.error("Error in freshen_existing_coin_wallet_net_transfers: %s", error_message)
+        return {
+            "status": "error",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": error_message,
+            "error_type": type(e).__name__
+        }
 
 
 def retrieve_existing_coin_freshness():
@@ -186,9 +213,12 @@ def update_dune_freshness_table(freshness_df):
     - freshness_df (pd.DataFrame): dataframe with info about the coins that will be queued
         for update
     """
-    # store df locally as csv
+    # define dune upload
+    dune_df = freshness_df[['chain', 'token_address', 'freshest_date']]
+    dune_df['updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+    # store df locally
     local_csv = 'net_transfers_freshness.csv'
-    dune_df = freshness_df[['chain', 'token_address', 'freshest_date', 'updated_at']]
     dune_df.to_csv(local_csv, index=False)
 
     # append the csv to dune
@@ -542,7 +572,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
     upload_df['wallet_address'] = transfers_df['wallet_address']
     upload_df['daily_net_transfers'] = transfers_df['daily_net_transfers']
     upload_df['data_source'] = 'dune'
-    upload_df['data_updated_at'] = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    upload_df['data_updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
     # set df datatypes of upload df
     dtype_mapping = {
