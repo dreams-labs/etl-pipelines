@@ -18,7 +18,10 @@ main:
         # update the coin.coin_wallet_profits table
         call: http.get
         args:
-            url: https://core-coin-wallet-profits-954736581165.us-west1.run.app
+            url: https://core-coin-wallet-profits-orchestrator-954736581165.us-west1.run.app?batch_size=120&max_workers=8
             auth:
                 type: OIDC
             timeout: 1800
+
+    - returnOutput:
+        return: 200
