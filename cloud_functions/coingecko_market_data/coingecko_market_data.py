@@ -23,7 +23,7 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 # suppress dreams_core.googlecloud info logs
-logging.getLogger('googlecloud').setLevel(logging.WARNING)
+logging.getLogger('dreams_core.googlecloud').setLevel(logging.WARNING)
 
 @functions_framework.http
 def update_coin_market_data_coingecko(request):
@@ -80,7 +80,7 @@ def update_coin_market_data_coingecko(request):
                 else:
                     failed_batches += 1
                     logger.warning(f'Batch {batch_num + 1}/{len(batches)} completed with no data')
-            except Exception as e:
+            except Exception as e:  # pylint:disable=broad-exception-caught
                 failed_batches += 1
                 logger.error(f'Batch {batch_num + 1} generated an exception: {str(e)}')
 
@@ -442,18 +442,7 @@ def upload_market_data(market_df):
     upload_df['updated_at'] = datetime.datetime.now(utc).strftime('%Y-%m-%d %H:%M:%S')
 
 
-    # set df datatypes of upload df
-    dtype_mapping = {
-        'date': 'datetime64[ns, UTC]',
-        'coingecko_id': str,
-        'price': float,
-        'market_cap': int,
-        'volume': int,
-        'updated_at': 'datetime64[ns, UTC]'
-    }
-    upload_df = upload_df.astype(dtype_mapping)
-    logger.info('prepared upload df with %s rows.',len(upload_df))
-
+    # Update price column to fit in bigquery's NUMERIC datatype
     def adjust_for_bigquery_numeric(value):
         # Parse scale from scientific notation
         str_value = f"{value:.15e}"
@@ -474,6 +463,20 @@ def upload_market_data(market_df):
             return value
 
     upload_df['price'] = upload_df['price'].apply(adjust_for_bigquery_numeric)
+
+
+    # set df datatypes of upload df
+    dtype_mapping = {
+        'date': 'datetime64[ns, UTC]',
+        'coingecko_id': str,
+        'price': float,
+        'market_cap': int,
+        'volume': int,
+        'updated_at': 'datetime64[ns, UTC]'
+    }
+    upload_df = upload_df.astype(dtype_mapping)
+    logger.info('prepared upload df with %s rows.',len(upload_df))
+
 
     # upload df to bigquery
     project_id = 'western-verve-411004'
