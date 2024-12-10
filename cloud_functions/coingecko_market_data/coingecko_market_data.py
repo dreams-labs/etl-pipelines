@@ -38,6 +38,8 @@ def update_coin_market_data_coingecko(request):
         request (flask.Request): The request object containing optional parameters:
             - batch_size (int): Number of coins to process in each batch (default: 100)
             - max_workers (int): Number of concurrent worker threads (default: 5)
+            - retry_recent_searches (bool): Whether to reattempt retrieval of market data for
+                coins that have had attempts in the last 2 days
 
     Returns:
         str: JSON string with status and batch processing results
@@ -45,12 +47,12 @@ def update_coin_market_data_coingecko(request):
     # Get parameters from request with defaults
     batch_size = int(request.args.get('batch_size', 100))
     max_workers = int(request.args.get('max_workers', 5))
-    retry_recent_failures = request.args.get('retry_recent_failures', 5)
+    retry_recent_searches = request.args.get('retry_recent_searches', False)
 
     logger.info(f'Starting update with batch_size={batch_size}, max_workers={max_workers}')
 
     # Retrieve coins needing updates
-    updates_df = retrieve_updates_df()
+    updates_df = retrieve_updates_df(retry_recent_searches)
     logger.info('retrieved bigquery for %s records with stale coingecko market data...',
                 len(updates_df))
 
@@ -94,16 +96,32 @@ def update_coin_market_data_coingecko(request):
 
 
 
-def retrieve_updates_df():
+def retrieve_updates_df(retry_recent_searches):
     """
     pulls a list of tokens with coingecko ids from bigquery, limiting to coins that either \
         have no market data or that have data at least 2 days old.
 
+    params:
+        retry_recent_searches (bool): whether to retry coins that have been attempted in
+            the last 2 days
+
     returns:
         updates_df (dataframe): list of tokens that need price updates from coingecko
     """
+    # If configured to retry recent searches, disable the where clause that filters them out
+    if retry_recent_searches:
+        recent_searches_sql = ""
+    else:
+        recent_searches_sql = """
+            and (
+                -- include if there aren't any past searches
+                cds.most_recent_search is null
+                -- include if the last search was over 2 days ago
+                OR cds.most_recent_search < (current_date('UTC') - 2)
+            )
+            """
 
-    query_sql = """
+    query_sql = f"""
         with coingecko_data_status as (
             select cgi.coingecko_id
             ,max(sl.created_at) as most_recent_search
@@ -130,12 +148,7 @@ def retrieve_updates_df():
         )
 
         -- criteria 2: only search if there's no prior/recent searches
-        and (
-            -- include if there aren't any past searches
-            cds.most_recent_search is null
-            -- include if the last search was over 2 days ago
-            OR cds.most_recent_search < (current_date('UTC') - 2)
-        )
+        {recent_searches_sql}
 
         -- criteria 3: exclude if it has ever returned a 404 code
         and cds.has_404_code = 0
