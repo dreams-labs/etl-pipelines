@@ -3,16 +3,86 @@ Retrieves new Ethereum blockchain transfer data from the BigQuery public tables,
 it to the ethereum_tranfers schema, and updates etl_pipelines.ethereum_net_transfers to
 add the newest tables.
 """
-from datetime import date
-# import functions_framework
-from dreams_core import core as dc
-from google.cloud import bigquery
 from datetime import datetime, date, timedelta
 from typing import List,Dict
+import functions_framework
+from dreams_core import core as dc
+from google.cloud import bigquery
 import pytz
 
 # set up logger at the module level
 logger = dc.setup_logger()
+
+
+@functions_framework.http
+def update_ethereum_transfers(request):  # pylint:disable=unused-argument
+    """
+    Main orchestration function for ethereum transfers ETL.
+    Handles the complete process of:
+    1. Checking which cohorts need updates
+    2. Creating new transfer tables
+    3. Updating the ethereum_net_transfers view
+    """
+    client = bigquery.Client()
+
+    try:
+        logger.info("Starting ethereum transfers ETL process...")
+
+        # Step 1: Get current status of cohorts
+        logger.debug("Checking cohort statuses...")
+        cohort_statuses = get_cohort_latest_dates(client)
+
+        # Calculate target sync date (2 days ago in UTC)
+        target_sync_date = (datetime.now(pytz.UTC) - timedelta(days=2)).date()
+        logger.info(f"Target sync date set to {target_sync_date}.")
+
+        # Log current status
+        for cohort in cohort_statuses:
+            logger.debug(
+                f"Cohort {cohort['cohort_number']}: "
+                f"Latest data date = {cohort['latest_data_date']}, "
+                f"Last table = {cohort['last_table_id']}"
+            )
+
+        # Step 2: Create new tables where needed
+        logger.info("Creating new transfer tables if necessary...")
+        table_results = create_new_transfer_tables(client, cohort_statuses, target_sync_date)
+
+        # Log table creation results
+        for result in table_results:
+            if result['status'] == 'success':
+                logger.info(
+                    f"Successfully created table for cohort {result['cohort_number']} "
+                    f"({result['start_date']} to {result['end_date']})"
+                )
+            else:
+                logger.error(
+                    f"Failed to create table for cohort {result['cohort_number']}: "
+                    f"{result['error']}"
+                )
+
+        # Step 3: Update the view if any tables were created
+        if any(result['status'] == 'success' for result in table_results):
+            logger.info("Updating ethereum_net_transfers view")
+            view_result = update_ethereum_transfers_view(client)
+
+            if view_result['status'] == 'success':
+                logger.info(
+                    f"Successfully updated view with {view_result['tables_included']} tables"
+                )
+            else:
+                logger.error(f"Failed to update view: {view_result['error']}")
+        else:
+            logger.info("No new tables created, skipping view update")
+
+        logger.info("ETL process completed")
+
+    except Exception as e:
+        logger.error(f"Error in ETL process: {str(e)}")
+        raise  # Re-raise the exception after logging
+    finally:
+        client.close()
+        logger.info("Closed BigQuery client")
 
 
 def get_cohort_latest_dates(client: bigquery.Client) -> List[Dict]:
@@ -161,12 +231,18 @@ def create_new_transfer_tables(client: bigquery.Client, cohort_statuses: List[Di
     results = []
 
     for cohort in cohort_statuses:
+        logger.debug(f"Processing cohort {cohort['cohort_number']}...")
+
         if cohort['latest_data_date'] >= target_sync_date:
+            logger.info(f"Cohort {cohort['cohort_number']} is up to date. Skipping.")
             continue
 
         # Define date range for new table
         start_date = cohort['latest_data_date'] + timedelta(days=1)
         end_date = target_sync_date
+
+        logger.info(f"Creating new table for cohort {cohort['cohort_number']} "
+                   f"from {start_date} to {end_date}")
 
         # Generate and execute query
         try:
@@ -176,9 +252,12 @@ def create_new_transfer_tables(client: bigquery.Client, cohort_statuses: List[Di
                 end_date=end_date
             )
 
+            logger.debug(f"Executing query for cohort {cohort['cohort_number']}")
             # Execute query
             query_job = client.query(query)
             query_job.result()  # Wait for query to complete
+
+            logger.info(f"Successfully created table for cohort {cohort['cohort_number']}")
 
             # Record result
             result = {
@@ -189,7 +268,8 @@ def create_new_transfer_tables(client: bigquery.Client, cohort_statuses: List[Di
                 'error': None
             }
 
-        except Exception as e:
+        except Exception as e:  # pylint:disable=broad-exception-caught
+            logger.error(f"Error creating table for cohort {cohort['cohort_number']}: {str(e)}")
             result = {
                 'cohort_number': cohort['cohort_number'],
                 'start_date': start_date,
@@ -200,4 +280,73 @@ def create_new_transfer_tables(client: bigquery.Client, cohort_statuses: List[Di
 
         results.append(result)
 
+    logger.info("Completed transfer table creation process")
     return results
+
+
+def update_ethereum_transfers_view(client: bigquery.Client) -> Dict:
+    """
+    Updates the ethereum_net_transfers view to include all existing transfer tables.
+
+    Args:
+        client: BigQuery client
+
+    Returns:
+        Dict with status of the operation
+    """
+    try:
+        # Get all existing transfer tables
+        logger.info("Querying for existing transfer tables")
+        tables_query = """
+        SELECT table_id
+        FROM `ethereum_transfers.__TABLES__`
+        WHERE table_id LIKE 'transfers_cohort_%'
+        ORDER BY table_id
+        """
+
+        tables = client.query(tables_query).result()
+        table_ids = [row.table_id for row in tables]
+
+        if not table_ids:
+            raise ValueError("No transfer tables found")
+
+        logger.info(f"Found {len(table_ids)} transfer tables")
+
+        # Generate the view SQL with line breaks after UNION ALL
+        union_queries = [f"    SELECT * FROM ethereum_transfers.{table_id}" for table_id in table_ids]
+        formatted_unions = " UNION ALL\n".join(union_queries)
+
+        view_query = f"""
+        CREATE OR REPLACE VIEW etl_pipelines.ethereum_net_transfers AS (
+
+        WITH all_transfers as (
+        {formatted_unions}
+        )
+
+        SELECT t.date
+        ,t.token_address
+        ,t.wallet_address
+        ,t.amount/pow(10,c.decimals) AS amount
+        FROM all_transfers t
+        JOIN `etl_pipelines.ethereum_transfers_cohorts` c ON c.address=t.token_address
+
+        )
+        """
+
+        # Execute the view creation
+        logger.info("Executing view update query")
+        query_job = client.query(view_query)
+        query_job.result()
+
+        return {
+            'status': 'success',
+            'tables_included': len(table_ids),
+            'table_list': table_ids
+        }
+
+    except Exception as e:  # pylint:disable=broad-exception-caught
+        logger.error(f"Error updating transfers view: {str(e)}")
+        return {
+            'status': 'failed',
+            'error': str(e)
+        }
