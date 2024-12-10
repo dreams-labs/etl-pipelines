@@ -8,6 +8,7 @@ from typing import List,Dict
 import functions_framework
 from dreams_core import core as dc
 from google.cloud import bigquery
+from google.api_core import exceptions
 import pytz
 
 # set up logger at the module level
@@ -63,7 +64,7 @@ def update_ethereum_transfers(request):  # pylint:disable=unused-argument
 
         # Step 3: Update the view if any tables were created
         if any(result['status'] == 'success' for result in table_results):
-            logger.info("Updating ethereum_net_transfers view")
+            logger.info("Updating ethereum_net_transfers view...")
             view_result = update_ethereum_transfers_view(client)
 
             if view_result['status'] == 'success':
@@ -74,12 +75,45 @@ def update_ethereum_transfers(request):  # pylint:disable=unused-argument
                 logger.error(f"Failed to update view: {view_result['error']}")
         else:
             logger.info("No new tables created, skipping view update")
+            view_result = {'status': 'skipped', 'message': 'No new tables created'}
 
         logger.info("ETL process completed")
 
-    except Exception as e:
-        logger.error(f"Error in ETL process: {str(e)}")
-        raise  # Re-raise the exception after logging
+        # Add return statement here with execution details
+        return ({
+            'status': 'success',
+            'message': 'ETL process completed successfully',
+            'details': {
+                'tables_created': table_results,
+                'view_update': view_result
+            }
+        }, 200)
+
+    except exceptions.GoogleAPIError as e:
+        logger.error(f"BigQuery API error: {str(e)}")
+        return {
+            'status': 'error',
+            'message': 'Database operation failed',
+            'details': {'error': str(e)}
+        }, 500
+
+    except ValueError as e:
+        logger.error(f"Value error in ETL process: {str(e)}")
+        return {
+            'status': 'error',
+            'message': 'Invalid data encountered',
+            'details': {'error': str(e)}
+        }, 400
+
+    except Exception as e:  # pylint: disable=broad-except
+        # Top-level handler for unexpected errors to prevent function crashes
+        logger.critical(f"Unexpected error in ETL process: {str(e)}")
+        return {
+            'status': 'error',
+            'message': 'Internal server error',
+            'details': {'error': str(e)}
+        }, 500
+
     finally:
         client.close()
         logger.info("Closed BigQuery client")
