@@ -1,0 +1,4 @@
+functions-framework==3.*
+pytz==2024.1
+google-cloud-bigquery>=3.11.4
+dreams_core>=0.2.24
