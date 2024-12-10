@@ -74,7 +74,16 @@ def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0
     rebuild_core_table()
     # drop_temp_tables() # disabled for now because they're useful for auditing data
 
-    return '{{"rebuild of core.coin_wallet_profits complete."}}'
+    return (
+        {
+            "status": "complete",
+            "batch_size": batch_size,
+            "max_workers": max_workers,
+            "total_batches": batch_count,
+            "failed_batches": failed_batches
+        },
+        200
+    )
 
 
 
@@ -210,7 +219,7 @@ def rebuild_core_table():
     Params: None
     Returns: None
     """
-    logger.debug("Rebuilding core.coin_wallet_profits table...")
+    logger.info("Rebuilding core.coin_wallet_profits table...")
 
     # 1. Confirm that all batches have been completed
     completeness_check_sql = """
