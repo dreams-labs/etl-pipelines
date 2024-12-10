@@ -96,7 +96,7 @@ def update_coin_market_data_coingecko(request):
 
 
 
-def retrieve_updates_df(retry_recent_searches):
+def retrieve_updates_df(retry_recent_searches=False):
     """
     pulls a list of tokens with coingecko ids from bigquery, limiting to coins that either \
         have no market data or that have data at least 2 days old.
