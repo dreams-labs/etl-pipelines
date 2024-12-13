@@ -72,7 +72,7 @@ def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0
 
     # 3. Rebuild core.coin_wallet_profits, optionally drop temp tables
     rebuild_core_table()
-    # drop_temp_tables() # disabled for now because they're useful for auditing data
+    drop_temp_tables()
 
     return (
         {
