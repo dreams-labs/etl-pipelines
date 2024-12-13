@@ -285,7 +285,7 @@ def rebuild_core_coin_wallet_transfers():
                 left join etl_pipelines.stables_and_wraps_exclusions coin_exclusions_stables on coin_exclusions_stables.coin_id = t.coin_id
 
                 -- remove the manually excluded addresses
-                and wallet_exclusions.wallet_address is null
+                where wallet_exclusions.wallet_address is null
                 and contract_addresses.address is null
 
                 -- remove coin exclusions
