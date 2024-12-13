@@ -1,5 +1,5 @@
 """
-cloud function that runs a query to refresh core.chains and reference.chain_nicknames
+Cloud function that runs a query to refresh core.chains and reference.chain_nicknames
 """
 
 import pandas as pd
