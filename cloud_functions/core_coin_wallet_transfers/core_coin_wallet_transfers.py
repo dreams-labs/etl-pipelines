@@ -34,19 +34,24 @@ def update_core_coin_wallet_transfers(request):  # pylint: disable=W0613
 
     # log job summary
     core_count = counts_df[counts_df['table']=='core.coin_wallet_transfers']['records'].iloc[0]
-    etl_count = counts_df[
-        counts_df['table']=='etl_pipelines.coin_wallet_net_transfers'
-        ]['records'].iloc[0]
+    dune_count = counts_df[counts_df['table']=='etl_pipelines.coin_wallet_net_transfers']['records'].iloc[0]
+    eth_count = counts_df[counts_df['table']=='etl_pipeline.ethereum_net_transfers']['records'].iloc[0]
     logger.info(
         'rebuilt core.coin_wallet_transfers [%s rows] from '
-        'etl_pipelines.coin_wallet_net_transfers [%s rows].',
-        core_count, etl_count
+        'Dune transfer data (etl_pipelines.coin_wallet_net_transfers) [%s rows]. '
+        'Ethereum blockchain data (etl_pipeline.ethereum_net_transfers) [%s rows].',
+        core_count, dune_count, eth_count
     )
 
     # rebuild address to ID mapping table
     create_wallet_id_table()
 
-    return '{{"rebuild of core.coin_wallet_transfers complete."}}'
+    return ({
+        'message': 'rebuild of core.coin_wallet_transfers complete.',
+        'core_count': int(core_count),
+        'dune_count': int(dune_count),
+        'eth_count': int(eth_count)
+    }, 200)
 
 
 
@@ -182,9 +187,9 @@ def rebuild_core_coin_wallet_transfers():
                     over (partition by eth.token_address,eth.wallet_address order by eth.date asc) as transfer_sequence
                 from etl_pipelines.ethereum_net_transfers eth
                 join core.coins c on c.address = eth.token_address and c.chain = 'Ethereum'
-            )
+            ),
 
-            ,dune_transfers as (
+            dune_transfers as (
                 select c.coin_id
                 ,c.chain_id
                 ,wnt.token_address
@@ -207,51 +212,55 @@ def rebuild_core_coin_wallet_transfers():
                 and wnt.wallet_address <> 'None' -- removes burn/mint address for solana
                 and wnt.wallet_address <> '0x0000000000000000000000000000000000000000' -- removes burn/mint addresses
                 and wnt.wallet_address <> '<nil>'
-            )
+            ),
 
-            ,all_transfers as (
+            all_transfers as (
                 select * from dune_transfers
                 union all
                 select * from eth_transfers
-            )
+            ),
 
-            ,exclusion_wallet_addresses as (
-                -- manual exclusions from https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=1863435581#gid=1863435581
-                select ch.chain_id
-                ,e.chain_text_source
-                ,case
-                    when ch.is_case_sensitive=False then lower(e.wallet_address)
-                    else e.wallet_address
-                    end as wallet_address
-                from `etl_pipelines.core_coin_wallet_transfers_exclusions` e
-                join `core.chains` ch on (
-                    (ch.chain_text_dune = e.chain_text_source)
-                    or e.chain_text_source = 'all'
+            exclusion_wallet_addresses as (
+                select wallet_address
+                from (
+                    -- manual exclusions from https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=1863435581#gid=1863435581
+                    select case
+                        when ch.is_case_sensitive=False then lower(e.wallet_address)
+                        else e.wallet_address
+                        end as wallet_address
+                    from `etl_pipelines.core_coin_wallet_transfers_exclusions` e
+                    join `core.chains` ch on (
+                        (ch.chain_text_dune = e.chain_text_source)
+                        or e.chain_text_source = 'all'
+                    )
+
+                    union all
+
+                    -- cex addresses from dune query https://dune.com/queries/4057433
+                    select case
+                        when ch.is_case_sensitive=False then lower(e.wallet_address)
+                        else e.wallet_address
+                        end as wallet_address
+                    from `reference.addresses_cexes` e
+                    join `core.chains` ch on ch.chain_text_dune = e.blockchain
+
+                    union all
+
+                    -- contract addresses from dune query https://dune.com/queries/4057525
+                    select case
+                        when ch.is_case_sensitive=False then lower(e.address)
+                        else e.address
+                        end as address
+                    from `reference.addresses_contracts` e
+                    join `core.chains` ch on ch.chain_text_dune = e.blockchain
+
+                    union all
+
+                    -- contract addresses from `bigquery-public-data.crypto_ethereum.contracts`
+                    select lower(address) as address
+                    from `reference.addresses_ethereum_contracts`
                 )
-
-                union all
-
-                -- cex addresses from dune query https://dune.com/queries/4057433
-                select ch.chain_id
-                ,e.blockchain as chain_text_source
-                ,case
-                    when ch.is_case_sensitive=False then lower(e.wallet_address)
-                    else e.wallet_address
-                    end as wallet_address
-                from `reference.addresses_cexes` e
-                join `core.chains` ch on ch.chain_text_dune = e.blockchain
-
-                union all
-
-                -- contract addresses from dune query https://dune.com/queries/4057525
-                select ch.chain_id
-                ,e.blockchain as chain_text_source
-                ,case
-                    when ch.is_case_sensitive=False then lower(e.address)
-                    else e.address
-                    end as address
-                from `reference.addresses_contracts` e
-                join `core.chains` ch on ch.chain_text_dune = e.blockchain
+                group by 1
             ),
 
             coin_wallet_transfers_draft as (

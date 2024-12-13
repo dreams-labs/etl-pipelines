@@ -1,11 +1,7 @@
-'''
-cloud function that runs a query to refresh core.chains and reference.chain_nicknames
-'''
-import datetime
-import time
-import logging
-import os
-from pytz import utc
+"""
+Cloud function that runs a query to refresh core.chains and reference.chain_nicknames
+"""
+
 import pandas as pd
 import numpy as np
 import functions_framework
@@ -18,33 +14,34 @@ logger = dc.setup_logger()
 
 
 @functions_framework.http
-def update_chains_tables(request):
-    '''
-    updates core.chains by ingesting the sheet containing chains, chain_ids, and chain aliases, 
+def update_chains_tables(request):  # pylint: disable=unused-argument
+    """
+    updates core.chains by ingesting the sheet containing chains, chain_ids, and chain aliases,
         then rebuilding the core.chains and reference.chain_nicknames tables
-    '''
+    """
     # load new chains aliases into bigquery
     ingest_chains_sheet()
 
     # refresh the core and reference tables
     refresh_chains_tables()
 
-    logger.info(f"refreshed core.chains and reference.chain_nicknames.")
+    logger.info("refreshed core.chains and reference.chain_nicknames.")
 
-    return f'{{"finished refreshing chains tables."}}'
+    return ({"success": True, "message": "finished refreshing chains tables"}, 200)
+
 
 
 
 def ingest_chains_sheet():
-    '''
-    refreshes the etl_pipelines.chains_sheet bigquery table by ingesting the underlying 
+    """
+    refreshes the etl_pipelines.chains_sheet bigquery table by ingesting the underlying
         sheets data, formatting it, and uploading it to bigquery
-    '''
+    """
 
     # Step 1: Read core.chains data out of the Dreams Data Schema workbook
-    # -------------------------------------------------------------------- 
-    # link: https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135#gid=388901135
-    df = dgc().read_google_sheet('11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs','core.chains!A:L')
+    # --------------------------------------------------------------------
+    # link: https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135#gid=388901135  # pylint:disable=line-too-long
+    df = dgc().read_google_sheet('11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs','core.chains!A:M')
 
 
     # Step 2: Normalize formatting of ingested data
@@ -53,7 +50,17 @@ def ingest_chains_sheet():
     df['chain_id'] = df['chain_id'].astype('int64')
 
     # Convert 'is_case_sensitive' to boolean
-    df['is_case_sensitive'] = df['is_case_sensitive'].replace('FALSE',False).replace('TRUE',True).replace('',np.nan).astype(pd.BooleanDtype())
+    df['is_case_sensitive'] = (df['is_case_sensitive']
+                               .replace('FALSE',False)
+                               .replace('TRUE',True)
+                               .replace('',np.nan)
+                               .astype(pd.BooleanDtype()))
+
+    df['is_erc20'] = (df['is_erc20']
+                      .replace('FALSE',False)
+                      .replace('TRUE',True)
+                      .replace('',np.nan)
+                      .astype(pd.BooleanDtype()))
 
     # Replace empty strings and None strings with NaN (which represents NULL in Pandas)
     df = df.replace('', np.nan).replace('None', np.nan, regex=False)
@@ -72,12 +79,12 @@ def ingest_chains_sheet():
 
 
 def refresh_chains_tables():
-    '''
+    """
     1. updates core.chains by copying the etl_pipelines_chains_sheet data
     2. updates the lookup table reference.chain_nicknames by aggregating and deduping chain aliases
-    '''
+    """
 
-    query_sql = '''
+    query_sql = """
         create or replace table core.chains as (
             select *
             from etl_pipelines.chains_sheet
@@ -88,21 +95,21 @@ def refresh_chains_tables():
 
             with all_aliases as (
                 select chain_id, lower(chain) as chain_reference from core.chains
-                union all 
+                union all
                 select chain_id, lower(nickname_1) from core.chains
-                union all 
+                union all
                 select chain_id, lower(nickname_2) from core.chains
-                union all 
+                union all
                 select chain_id, lower(chain_text_geckoterminal) from core.chains
-                union all 
+                union all
                 select chain_id, lower(chain_text_coingecko) from core.chains
-                union all 
+                union all
                 select chain_id, lower(chain_text_dune) from core.chains
-                union all 
+                union all
                 select chain_id, lower(chain_text_defillama) from core.chains
-                union all 
+                union all
                 select chain_id, lower(chain_text_dexscreener) from core.chains
-                union all 
+                union all
                 select chain_id, lower(chain_text_dextools) from core.chains
             ),
 
@@ -124,6 +131,6 @@ def refresh_chains_tables():
 
         select *
         from reference.chain_nicknames
-        '''
+        """
 
     dgc().run_sql(query_sql)
