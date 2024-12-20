@@ -14,12 +14,12 @@ Tests alignment of USD balance calculations with profits and transfers. Logic fl
 5. Flags mismatches where differences exceed both $1 and 1% threshold
 */
 
--- select 50 random coins to test
+-- select random coins to test
 with coin_sample as (
     select coin_id
     from {{ ref('coins') }}
-    order by rand()
-    limit 50
+    ORDER BY farm_fingerprint(concat('seed42', coin_id))
+    limit 300
 )
 
 -- select data that is at least 10 days old. if coin_market_data has been updated since
@@ -114,11 +114,11 @@ from recalc_diff_pcts
 where (
     ( -- select rows where usd calculations were off by more than $1 and 1%
         abs(usd_balance_diff) > 1
-        AND abs(usd_balance_diff / greatest(expected_usd_balance,prev_usd_balance)) > 0.01
+        AND (abs(usd_balance_diff / greatest(expected_usd_balance,prev_usd_balance)) > 0.01)
     )
 OR
     ( -- select rows where profits_change was off by more than $1 and 1%
-        abs(profits_change) > 1
-        AND abs(profits_change_diff / profits_change) > 0.01
+        abs(profits_change_diff) > 1
+        AND (abs(profits_change_diff / profits_change) > 0.01)
     )
 )
