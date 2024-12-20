@@ -1,4 +1,4 @@
-{{ config(schema='core') }}
+{{ config(schema=var('target_schema', 'core')) }}
 
 SELECT *
-FROM `western-verve-411004.core.coin_wallet_profits`
+FROM `western-verve-411004.{{ var('target_schema', 'core') }}.coin_wallet_profits`
