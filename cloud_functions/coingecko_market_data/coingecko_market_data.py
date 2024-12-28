@@ -417,21 +417,16 @@ def ping_coingecko_api(coingecko_id):
     return df,r.status_code
 
 
-
-def upload_market_data(market_df):
+def format_upload_df(market_df):
     """
-    appends the market_df to the bigquery table etl_pipelines.coin_market_data_coingecko.
+    Formats the market data for bigquery upload, including special handling for the
+    price field's NUMERIC datatype.
 
-    steps:
-        1. explicitly map datatypes onto new dataframe upload_df
-        2. declare schema datatypes
-        3. upload using pandas_gbq
+    Params:
+    - market_df (df): dataframe with the api response market data
 
-    params:
-        freshness_df (pandas.DataFrame): df of fresh dune data
-        transfers_df (pandas.DataFrame): df of token transfers
-    returns:
-        none
+    Returns:
+    - upload_df (df): the param df formatted for bugquery upload
     """
     # Filter out records for the current UTC date
     current_utc_date = pd.Timestamp.now(tz='UTC').normalize()
@@ -469,22 +464,48 @@ def upload_market_data(market_df):
 
     upload_df['price'] = upload_df['price'].apply(adjust_for_bigquery_numeric)
 
+    return upload_df
 
-    # Upload the records via streaming insert
+
+def upload_market_data(market_df, max_retries=3, base_delay=3):
+    """
+    Appends market data to BigQuery with exponential backoff retries.
+
+    Params:
+        market_df (DataFrame): Market data to upload
+        max_retries (int): Maximum retry attempts
+        base_delay (int): Base delay in seconds between retries
+
+    Returns:
+        bool: Success status
+    """
+    # Format the data for upload
+    upload_df = format_upload_df(market_df)
+
+    # Attempt upload with retries
     client = bigquery.Client()
     table_id = 'western-verve-411004.etl_pipelines.coin_market_data_coingecko'
 
-    errors = client.insert_rows_from_dataframe(
-        client.get_table(table_id),
-        upload_df
-    )
+    for attempt in range(max_retries):
+        try:
+            errors = client.insert_rows_from_dataframe(
+                client.get_table(table_id),
+                upload_df
+            )
+            if not errors:
+                logger.info(f'Streamed {len(upload_df)} records to {table_id}')
+                return True
 
-    # Check if errors exist and aren't empty
-    if errors and any(errors):
-        logger.error('Failed to stream records: %s', errors)
-    else:
-        logger.info('Streamed %d records to %s', len(upload_df), table_id)
+        except Exception as e:  # pylint:disable=broad-exception-caught
+            delay = base_delay * (2 ** attempt)
+            if attempt < max_retries - 1:
+                logger.warning(f'Upload attempt {attempt + 1} failed, retrying in {delay}s: {str(e)}')
+                time.sleep(delay)
+                continue
+            else:
+                logger.error(f'Upload failed after {max_retries} attempts: {str(e)}')
 
+    return False
 
 
 def log_market_data_search(client, coingecko_id, api_status_code, market_df, new_row_count):
