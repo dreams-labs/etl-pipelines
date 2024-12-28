@@ -492,11 +492,17 @@ def upload_market_data(market_df, max_retries=3, base_delay=3):
                 client.get_table(table_id),
                 upload_df
             )
-            if not errors:
+
+            # Check if errors exist and aren't empty
+            if errors and any(errors):
+                # pylint:disable=broad-exception-raised
+                raise Exception(f'Failed to stream records: {errors}')
+            else:
                 logger.info(f'Streamed {len(upload_df)} records to {table_id}')
                 return True
 
-        except Exception as e:  # pylint:disable=broad-exception-caught
+        # pylint:disable=broad-exception-caught
+        except Exception as e:
             delay = base_delay * (2 ** attempt)
             if attempt < max_retries - 1:
                 logger.warning(f'Upload attempt {attempt + 1} failed, retrying in {delay}s: {str(e)}')
