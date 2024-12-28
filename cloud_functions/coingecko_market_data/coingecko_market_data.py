@@ -2,6 +2,7 @@
 cloud function that updates the bigquery table `etl_pipelines.coin_market_data_coingecko` by \
     making api calls to coingecko to get market data and uploading it
 """
+import time
 import datetime
 import os
 import uuid
@@ -13,7 +14,7 @@ import pandas as pd
 import requests
 import pandas_gbq
 import functions_framework
-from google.cloud import bigquery, exceptions
+from google.cloud import bigquery, storage, exceptions
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
@@ -53,7 +54,7 @@ def update_coin_market_data_coingecko(request):
 
     # Retrieve coins needing updates
     updates_df = retrieve_updates_df(retry_recent_searches)
-    logger.info('retrieved bigquery for %s records with stale coingecko market data...',
+    logger.info('retrieved freshness state for %s coins with stale coingecko market data...',
                 len(updates_df))
 
     # Initialize a single BigQuery client
@@ -229,33 +230,37 @@ def process_coin_batch(coin_batch_df, client):
 
 def retrieve_coingecko_market_data(coingecko_id):
     """
-    attempts to retrieve data from the coingecko api including error handling for various \
-        coingecko api status codes
+    Attempts to retrieve data from coingecko API with exponential backoff.
 
-    params:
+    Params:
         coingecko_id (string): coingecko id of coin
 
-    returns:
+    Returns:
         market_df (dataframe): raw api response of market data
         api_status_code (int): status code of coingecko api call
     """
-    retry_attempts = 3
+    base_delay = 1  # Start with 1 second delay
+    max_delay = 32  # Max delay of 32 seconds
+    retry_attempts = 5
 
-    for _ in range(retry_attempts):
-        market_df,api_status_code = ping_coingecko_api(coingecko_id)
+    for attempt in range(retry_attempts):
+        market_df, api_status_code = ping_coingecko_api(coingecko_id)
+
         if api_status_code == 200:
             break
         elif api_status_code == 404:
             break
-        elif api_status_code == 429:
-            logger.info('coingecko api call timed out, retrying after a 60 second pause...')
-
+        elif api_status_code == 429 or api_status_code == 0:  # 0 for empty responses
+            delay = min(base_delay * (2 ** attempt), max_delay)
+            logger.info('Rate limited, waiting %s seconds before retry...', delay)
+            time.sleep(delay)
             continue
         else:
-            logger.error('unexpected coingecko api status code %s for %s, continuing to next coin.',
+            logger.error('Unexpected coingecko api status code %s for %s',
                 str(api_status_code), coingecko_id)
             break
-    logger.debug('coingecko api call for %s completed with status code %s.',
+
+    logger.debug('coingecko api call for %s completed with status code %s',
         coingecko_id, str(api_status_code))
 
     return market_df, api_status_code
@@ -465,45 +470,20 @@ def upload_market_data(market_df):
     upload_df['price'] = upload_df['price'].apply(adjust_for_bigquery_numeric)
 
 
-    # set df datatypes of upload df
-    dtype_mapping = {
-        'date': 'datetime64[ns, UTC]',
-        'coingecko_id': str,
-        'price': float,
-        'market_cap': int,
-        'volume': int,
-        'updated_at': 'datetime64[ns, UTC]'
-    }
-    upload_df = upload_df.astype(dtype_mapping)
-    logger.info('prepared upload df with %s rows.',len(upload_df))
+    # Upload the records via streaming insert
+    client = bigquery.Client()
+    table_id = 'western-verve-411004.etl_pipelines.coin_market_data_coingecko'
 
-
-    # upload df to bigquery
-    project_id = 'western-verve-411004'
-    table_name = 'etl_pipelines.coin_market_data_coingecko'
-    schema = [
-        {'name':'date', 'type': 'datetime'},
-        {'name':'chain_text_coingecko', 'type': 'string'},
-
-        # note the bignumeric datatype which ensures precision for very small price values
-        {'name':'price', 'type': 'bignumeric'},
-
-        {'name':'market_cap', 'type': 'int'},
-        {'name':'volume', 'type': 'int'},
-        {'name':'updated_at', 'type': 'datetime'}
-    ]
-    pandas_gbq.to_gbq(
+    errors = client.insert_rows_from_dataframe(
+        client.get_table(table_id),
         upload_df
-        ,table_name
-        ,project_id=project_id
-        ,if_exists='append'
-        ,table_schema=schema
-        ,progress_bar=False
-
-        # this setting is required for the bignumeric column to upload without errors
-        ,api_method='load_csv'
     )
-    logger.info('appended upload df to %s.', table_name)
+
+    # Check if errors exist and aren't empty
+    if errors and any(errors):
+        logger.error('Failed to stream records: %s', errors)
+    else:
+        logger.info('Streamed %d records to %s', len(upload_df), table_id)
 
 
 
@@ -562,14 +542,19 @@ def log_failed_upload(combined_market_df):
     filename = f"failed_batch_{len(combined_market_df)}_{current_datetime}_{random_uuid}.csv"
     gcs_folder='etl_objects/coingecko_market_data_failed_batches'
 
-    # Upload to GCS
+    # Upload directly to GCS without temp files
     try:
-        dgc().gcs_upload_file(
-            combined_market_df,
-            gcs_folder=gcs_folder,
-            filename=filename
-        )
-        logger.info("Uploaded failed batch to GCS folder '%s' as %s.", gcs_folder, filename)
+        # Convert DataFrame to CSV string in memory
+        csv_data = combined_market_df.to_csv(index=False).encode('utf-8')
+
+        # Upload bytes directly
+        storage_client = storage.Client()
+        bucket = storage_client.bucket('dreams-labs-storage')
+        blob = bucket.blob(f'{gcs_folder}/{filename}')
+        blob.upload_from_string(csv_data, content_type='text/csv')
+
+        logger.info("Uploaded failed batch to GCS as %s", filename)
+
     except exceptions.GoogleCloudError as gcs_error:
         logger.error("Failed to upload failed batch to GCS due to cloud error: %s", gcs_error)
     except IOError as io_error:
