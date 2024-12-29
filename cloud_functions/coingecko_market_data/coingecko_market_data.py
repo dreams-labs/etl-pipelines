@@ -15,6 +15,7 @@ import requests
 import pandas_gbq
 import functions_framework
 from google.cloud import bigquery, storage, exceptions
+from google.api_core.exceptions import BadRequest,Conflict
 from dreams_core.googlecloud import GoogleCloud as dgc
 from dreams_core import core as dc
 
@@ -49,8 +50,25 @@ def update_coin_market_data_coingecko(request):
     batch_size = int(request.args.get('batch_size', 100))
     max_workers = int(request.args.get('max_workers', 5))
     retry_recent_searches = request.args.get('retry_recent_searches', False)
+    override_streaming_data_lock = request.args.get('override_streaming_data_lock', False)
 
     logger.info(f'Starting update with batch_size={batch_size}, max_workers={max_workers}')
+
+    # Check if there is streaming data queued for the table
+    has_streaming_data_queued = streaming_data_check('etl_pipelines.coin_market_data_coingecko')
+
+    # If streaming data is queued and the override isn't activated, terminate and return 400
+    if has_streaming_data_queued and not override_streaming_data_lock:
+        logger.warning("Streaming data queue detected in etl_pipelines.coin_market_data_coingecko. "
+                       "Cancelling data update request to prevent insertion of duplicate records. "
+                       "To override this, set param 'override_streaming_data_lock' to True.")
+        return json.dumps({
+            "status": "400",
+            "successful_batches": 0,
+            "failed_batches": 0,
+            "total_batches": 0
+        })
+
 
     # Retrieve coins needing updates
     updates_df = retrieve_updates_df(retry_recent_searches)
@@ -225,6 +243,54 @@ def process_coin_batch(coin_batch_df, client):
     # If no new records were returned, the batch sequence still succeeded
     logger.warning("No market data collected for this batch")
     return True
+
+
+
+def streaming_data_check(table):
+    """
+    Runs a failing query to assess if the table has current streaming data. The query attempts
+    to rename the table to its current name, which will always fail but which will return a
+    different failure code depending on the streaming data state.
+
+    If the table has streaming data, this will cause a failure code 409 because of the
+    streaming data check.
+
+    If the streaming data check is passed, it will cause failure code 400 because the
+    table can't be renamed to itself.
+
+    Params:
+    - table (str): the table name and datset, e.g. "etl_pipelines.coin_market_data_coingecko"
+
+    Returns:
+    - has_streaming_data (bool): True if the table has currently streaming data
+    """
+    # Extract table name components
+    dataset = table.split('.')[0]
+    tablename =table.split('.')[1]
+
+    try:
+        streaming_check_sql = f"alter table {dataset}.{tablename} rename to {tablename}"
+        _ = dgc().run_sql(streaming_check_sql)
+
+    # Catches 400 responses due to streaming data
+    except BadRequest as e:
+        # Returns "400 Cannot rename ____ because it has streaming data"
+        logger.debug("Details of expected failure from streaming data check: %s", str(e))
+
+        # Only return True if the response includes the streaming data state
+        has_streaming_data = 'because it has streaming data' in str(e)
+        return has_streaming_data
+
+    # Catches 409 responses due to trying to rename the table to itself
+    except Conflict as e:
+        # Returns "409 Already Exists: Table _____"
+        logger.debug("Details of expected failure from streaming data check: %s", str(e))
+        has_streaming_data = False
+        return has_streaming_data
+
+    # If anything else happens raise an error
+    except Exception as e:  # pylint: disable=broad-except
+        raise RuntimeError(f"Unexpected error during streaming check: {str(e)}") from e
 
 
 
