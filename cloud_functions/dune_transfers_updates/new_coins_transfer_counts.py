@@ -143,7 +143,8 @@ def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts
 
             -- all ethereum transfers are sourced from the public ethereum transfers table
             -- Dune Solana data is suspect
-            and c.chain not in ('Ethereum','Solana')
+            -- now includes polygon due to expected integration w bigquery blockchain
+            and c.chain not in ('Ethereum','Solana','Polygon')
 
             -- new coins don't have existing transfer data
             and e.token_address is null
