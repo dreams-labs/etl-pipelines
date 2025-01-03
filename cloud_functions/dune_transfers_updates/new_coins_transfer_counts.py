@@ -14,6 +14,64 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 
+
+# -----------------------------------
+#           Core Interface
+# -----------------------------------
+
+def orchestrate_dune_transfer_counts(dune_chains: list, coin_limit: int = 500,
+                                   refresh_existing: bool = False) -> None:
+    """
+    Orchestrates the end-to-end pipeline for identifying and counting token transfers
+    for new coins from Dune Analytics.
+
+    Params:
+    - dune_chains (list): Chain names matching Dune's terminology (e.g., ['arbitrum', 'optimism'])
+    - coin_limit (int): Maximum number of new coins to process per run
+    - refresh_existing (bool): Whether to recount transfers for coins with existing records
+
+    Returns:
+    - None: Updates are written directly to BigQuery
+    """
+    try:
+        # Step 1: Identify new coins that need transfer data
+        logger.info("Identifying new coins without transfer data...")
+        new_coins_df = retrieve_new_coins_list(
+            dune_chains=dune_chains,
+            coin_limit=coin_limit,
+            refresh_existing_counts=refresh_existing
+        )
+
+        if len(new_coins_df) == 0:
+            logger.info("No new coins to process. Exiting.")
+            return
+
+        # Step 2: Load new coins to Dune for processing
+        logger.info(f"Loading {len(new_coins_df)} coins to Dune...")
+        load_new_coins_to_dune(new_coins_df)
+
+        # Step 3: Generate and execute transfer counting query
+        logger.info("Generating transfer count query...")
+        count_query = generate_erc_20_counts_query(dune_chains)
+
+        logger.info("Executing Dune query for transfer counts...")
+        transfer_counts_df = get_dune_transfer_counts(count_query)
+
+        # Step 4: Upload results to BigQuery
+        logger.info("Uploading transfer counts to BigQuery...")
+        upload_transfer_counts(transfer_counts_df)
+
+        logger.info("Pipeline completed successfully")
+
+    except Exception as e:
+        logger.error(f"Pipeline failed: {str(e)}")
+        raise
+
+
+# -----------------------------------
+#          Helper Functions
+# -----------------------------------
+
 def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts=False):
     """
     Retrieves a list of coins that don't have any Dune transfer data. By default it
@@ -323,29 +381,32 @@ def upload_transfer_counts(transfer_counts_df):
     logger.info('Updated etl_pipelines.dune_new_coin_transfer_counts with new counts.')
 
 
+# -----------------------------------
+#         Utility Functions
+# -----------------------------------
 
-# def create_dune_new_coins_table():
-#     """
-#     this is the code that was used to create dune.dreamslabs.etl_new_erc20_coins.
-#     it is not intended to be reran as part of normal operations but is retained in case it needs
-#     to be referenced or altered.
+def create_dune_new_coins_table():
+    """
+    this is the code that was used to create dune.dreamslabs.etl_new_erc20_coins.
+    it is not intended to be reran as part of normal operations but is retained in case it needs
+    to be referenced or altered.
 
-#     params:
-#         none
-#     returns:
-#         none
-#     """
-#     # make empty dune table
-#     dune = DuneClient.from_env()
+    params:
+        none
+    returns:
+        none
+    """
+    # make empty dune table
+    dune = DuneClient.from_env()
 
-#     table = dune.create_table(
-#         namespace='dreamslabs',
-#         table_name='etl_new_erc20_coins',
-#         description='erc20 coins that do not have dune transfer data',
-#         schema= [
-#             {'name': 'chain', 'type': 'varchar'},
-#             {'name': 'token_address', 'type': 'varchar'},
-#             {'name': 'updated_at', 'type': 'timestamp'},
-#         ],
-#         is_private=False
-#     )
+    table = dune.create_table(
+        namespace='dreamslabs',
+        table_name='etl_new_erc20_coins',
+        description='erc20 coins that do not have dune transfer data',
+        schema= [
+            {'name': 'chain', 'type': 'varchar'},
+            {'name': 'token_address', 'type': 'varchar'},
+            {'name': 'updated_at', 'type': 'timestamp'},
+        ],
+        is_private=False
+    )
