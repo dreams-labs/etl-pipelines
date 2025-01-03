@@ -104,7 +104,7 @@ def update_core_coin_wallet_profits(request):
 
 
 # -----------------------------------
-#          Support Functions
+#                  Helper Functions
 # -----------------------------------
 
 def retrieve_transfers_data(batch_number=None):
