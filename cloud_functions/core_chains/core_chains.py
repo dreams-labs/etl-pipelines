@@ -1,9 +1,4 @@
-"""
-Cloud function that runs a query to refresh core.chains and reference.chain_nicknames
-"""
-
-import pandas as pd
-import numpy as np
+"""Cloud function that runs a query to refresh core.chains and reference.chain_nicknames"""
 import functions_framework
 import dreams_core.core as dc
 from dreams_core.googlecloud import GoogleCloud as dgc
