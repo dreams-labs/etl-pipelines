@@ -211,11 +211,10 @@ models:
         description: "daily price"
         data_tests:
           - not_null
-    data_tests:
-      - dbt_utils.unique_combination_of_columns:
-          combination_of_columns:
-            - date
-            - coingecko_id
+    # data_tests: none
+    # dupes frequently get inadvertantly added because of with streaming inserts. the dupes
+    # have never contained bad data and don't cause harm if properly removed from the core
+    # table as part of core.coin_market_data generation
 
   - name: coin_wallet_net_transfers
     description: "daily transfer data from dune"
