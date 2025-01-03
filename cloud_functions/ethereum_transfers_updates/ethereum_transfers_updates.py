@@ -4,7 +4,7 @@ it to the ethereum_tranfers schema, and updates etl_pipelines.ethereum_net_trans
 add the newest tables.
 """
 from datetime import datetime, date, timedelta
-from typing import List,Dict
+from typing import List, Dict
 import functions_framework
 from dreams_core import core as dc
 from google.cloud import bigquery
@@ -14,6 +14,10 @@ import pytz
 # set up logger at the module level
 logger = dc.setup_logger()
 
+
+# -----------------------------------
+#           Core Interface
+# -----------------------------------
 
 @functions_framework.http
 def update_ethereum_transfers(request):  # pylint:disable=unused-argument
@@ -118,6 +122,11 @@ def update_ethereum_transfers(request):  # pylint:disable=unused-argument
         client.close()
         logger.info("Closed BigQuery client")
 
+
+
+# -----------------------------------
+#          Helper Functions
+# -----------------------------------
 
 def get_cohort_latest_dates(client: bigquery.Client) -> List[Dict]:
     """
