@@ -46,7 +46,17 @@ def retrieve_raw_market_data():
     start_time = time.time()
 
     query_sql = """
-        with coingecko_market_data as (
+        -- this dedupe step exists to counteract the frequent issues with streaming inserts
+        -- of coingecko data causing duplicated records in etl_pipelines.coin_market_data_coingecko
+        -- the dupes have never contained bad data and are an occassional artifact of the etls
+        -- that don't cause harm if properly removed from the core table
+        with dedupe_coingecko as (
+            select *
+            ,row_number() over (partition by md.coingecko_id,md.date order by md.updated_at asc) as rn
+            from etl_pipelines.coin_market_data_coingecko md
+        ),
+
+        coingecko_market_data as (
             select md.date
             ,co.coin_id
             ,md.price
@@ -58,7 +68,9 @@ def retrieve_raw_market_data():
             ,'coingecko' as data_source
             ,md.updated_at
             from core.coins co
-            join etl_pipelines.coin_market_data_coingecko md on md.coingecko_id = co.coingecko_id
+            join dedupe_coingecko md on md.coingecko_id = co.coingecko_id
+                -- apply dedupe filter
+                and md.rn=1
 
             -- these 3 coins have coingecko data where a few dates incorrectly show 0 prices
             where not (
