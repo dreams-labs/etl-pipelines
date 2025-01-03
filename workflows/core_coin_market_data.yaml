@@ -39,6 +39,7 @@ main:
             url: https://core-coin-market-data-fatui3rd2a-uw.a.run.app
             auth:
                 type: OIDC
+            timeout: 1800
         result: resp
 
     - returnOutput:
