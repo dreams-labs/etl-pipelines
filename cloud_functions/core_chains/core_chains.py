@@ -26,7 +26,6 @@ def update_chains_tables(request):  # pylint: disable=unused-argument
 
 
 
-
 def ingest_chains_sheet():
     """
     refreshes the etl_pipelines.chains_sheet bigquery table by ingesting the underlying
