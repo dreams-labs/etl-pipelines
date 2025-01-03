@@ -106,7 +106,6 @@ def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts
             select * from new_records
         )
         {chain_filter_sql}
-        -- where chain not in ('bnb','base','polygon','avalanche_c')
         order by total_volume asc
         limit {coin_limit}
     """

@@ -37,7 +37,6 @@ def ingest_chains_sheet():
     refreshes the etl_pipelines.chains_sheet bigquery table by ingesting the underlying
         sheets data, formatting it, and uploading it to bigquery
     """
-
     # Step 1: Read core.chains data out of the Dreams Data Schema workbook
     # --------------------------------------------------------------------
     # link: https://docs.google.com/spreadsheets/d/11Mi1a3SeprY_GU_QGUr_srtd7ry2UrYwoaRImSACjJs/edit?gid=388901135#gid=388901135  # pylint:disable=line-too-long
@@ -49,31 +48,44 @@ def ingest_chains_sheet():
     # Convert 'chain_id' to int64
     df['chain_id'] = df['chain_id'].astype('int64')
 
-    # Convert 'is_case_sensitive' to boolean
-    df['is_case_sensitive'] = (df['is_case_sensitive']
-                               .replace('FALSE',False)
-                               .replace('TRUE',True)
-                               .replace('',np.nan)
-                               .astype(pd.BooleanDtype()))
+    # Convert empty strings and special values to None, then convert to nullable dtypes
+    df = df.replace(['', 'None', 'FALSE', 'TRUE'], [None, None, False, True])
 
-    df['is_erc20'] = (df['is_erc20']
-                      .replace('FALSE',False)
-                      .replace('TRUE',True)
-                      .replace('',np.nan)
-                      .astype(pd.BooleanDtype()))
+    # Handle boolean columns with nullable boolean type
+    boolean_cols = ['is_case_sensitive', 'is_erc20']
+    for col in boolean_cols:
+        df[col] = df[col].astype('boolean')
 
-    # Replace empty strings and None strings with NaN (which represents NULL in Pandas)
-    df = df.replace('', np.nan).replace('None', np.nan, regex=False)
-    df = df.fillna(value=np.nan)
+    # Convert chain_id to Int64 (nullable integer)
+    df['chain_id'] = df['chain_id'].astype('Int64')
+
+    # Replace remaining empty strings with None
+    str_cols = df.select_dtypes(include=['object']).columns
+    df[str_cols] = df[str_cols].replace('', None)
 
 
     # Step 3: Upload the normalized data as a bigquery table
     # ------------------------------------------------------
-    dgc().upload_df_to_bigquery(
-        df,
-        'etl_pipelines',
-        'chains_sheet',
-        if_exists='replace'
+    # Upload to BigQuery with proper schema handling
+    df.to_gbq(
+        destination_table='etl_pipelines.chains_sheet',
+        project_id='western-verve-411004',
+        if_exists='replace',
+        table_schema=[
+            {'name': 'chain_id', 'type': 'INTEGER'},
+            {'name': 'chain', 'type': 'STRING'},
+            {'name': 'is_case_sensitive', 'type': 'BOOLEAN'},
+            {'name': 'is_erc20', 'type': 'BOOLEAN'},
+            {'name': 'nickname_1', 'type': 'STRING'},
+            {'name': 'nickname_2', 'type': 'STRING'},
+            {'name': 'chain_text_geckoterminal', 'type': 'STRING'},
+            {'name': 'chain_text_coingecko', 'type': 'STRING'},
+            {'name': 'chain_text_dune', 'type': 'STRING'},
+            {'name': 'chain_text_defillama', 'type': 'STRING'},
+            {'name': 'bigquery_location', 'type': 'STRING'},
+            {'name': 'chain_text_dexscreener', 'type': 'STRING'},
+            {'name': 'chain_text_dextools', 'type': 'STRING'}
+        ]
     )
 
 
