@@ -641,7 +641,7 @@ def create_dune_freshness_table():
     # make empty dune table
     dune = DuneClient.from_env()
 
-    table = dune.create_table(
+    _ = dune.create_table(
         namespace='dreamslabs',
         table_name='etl_net_transfers_freshness',
         description='coin wallet daily net transfer data freshness by chain and token address',
