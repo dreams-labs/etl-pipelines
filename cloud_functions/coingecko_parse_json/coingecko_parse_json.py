@@ -116,82 +116,96 @@ def fetch_coin_json(coin,storage_client):
 
 def upload_metadata(json_data, bigquery_client):
     """
-    Extracts and uploads metadata to BigQuery, including description.
+    Extracts and uploads metadata to BigQuery with safe key access.
     """
     table_id = 'western-verve-411004.etl_pipelines.coin_coingecko_metadata'
     updated_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # Safely fetch description with a fallback to None (which will be NULL in BigQuery)
-    description = json_data.get('description', {}).get('en', None)
+    # Safely access nested data
+    links = json_data.get('links', {})
+    market_data = json_data.get('market_data', {})
+    homepage_links = links.get('homepage', [])
+    homepage = homepage_links[0] if homepage_links else None
 
     rows_to_insert = [{
-        'coingecko_id': json_data['id'],
-        'symbol': json_data['symbol'],
-        'name': json_data['name'],
-        'homepage': json_data['links']['homepage'][0],
-        'twitter_screen_name': json_data['links']['twitter_screen_name'],
-        'telegram_channel_identifier': json_data['links']['telegram_channel_identifier'],
-        'image_urls': str(json_data['image']),
-        'sentiment_votes_up_percentage': json_data['sentiment_votes_up_percentage'],
-        'sentiment_votes_down_percentage': json_data['sentiment_votes_down_percentage'],
-        'watchlist_portfolio_users': json_data['watchlist_portfolio_users'],
-        'total_supply': json_data['market_data']['total_supply'],
-        'max_supply': json_data['market_data']['max_supply'],
-        'circulating_supply': json_data['market_data']['circulating_supply'],
-        'description': description,  # Using None as fallback for a NULL value in BigQuery
+        'coingecko_id': json_data.get('id'),
+        'symbol': json_data.get('symbol'),
+        'name': json_data.get('name'),
+        'homepage': homepage,
+        'twitter_screen_name': links.get('twitter_screen_name'),
+        'telegram_channel_identifier': links.get('telegram_channel_identifier'),
+        'image_urls': str(json_data.get('image')),
+        'sentiment_votes_up_percentage': json_data.get('sentiment_votes_up_percentage'),
+        'sentiment_votes_down_percentage': json_data.get('sentiment_votes_down_percentage'),
+        'watchlist_portfolio_users': json_data.get('watchlist_portfolio_users'),
+        'total_supply': market_data.get('total_supply'),
+        'max_supply': market_data.get('max_supply'),
+        'circulating_supply': market_data.get('circulating_supply'),
+        'description': json_data.get('description', {}).get('en'),
         'updated_at': updated_at
     }]
 
     insert_rows(bigquery_client, table_id, rows_to_insert)
 
 
+
 def upload_categories(json_data, bigquery_client):
     """
-    Extracts and uploads categories to BigQuery.
+    Extracts and uploads categories to BigQuery with safe access.
     """
     table_id = 'western-verve-411004.etl_pipelines.coin_coingecko_categories'
     updated_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # Check if 'categories' exists and is not empty
     categories = json_data.get('categories', [])
-    if not categories:
-        logger.info("No categories found for coingecko_id: %s", json_data['id'])
-        return  # Exit early if no categories to process
+    coingecko_id = json_data.get('id')
+
+    if not categories or not coingecko_id:
+        logger.info("No categories or missing ID for coingecko_id: %s", coingecko_id)
+        return
 
     rows_to_insert = [
         {
-            'coingecko_id': json_data['id'],
+            'coingecko_id': coingecko_id,
             'category': category,
             'coingecko_rank': i+1,
             'updated_at': updated_at
         }
         for i, category in enumerate(categories)
+        if category  # Skip empty category strings
     ]
 
-    insert_rows(bigquery_client, table_id, rows_to_insert)
+    if rows_to_insert:
+        insert_rows(bigquery_client, table_id, rows_to_insert)
 
-
-def upload_contracts(json_data,bigquery_client):
+def upload_contracts(json_data, bigquery_client):
     """
-    Extracts and uploads contracts to BigQuery.
+    Extracts and uploads contracts to BigQuery with safe access.
     """
     table_id = 'western-verve-411004.etl_pipelines.coin_coingecko_contracts'
     updated_at = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    contracts = json_data['detail_platforms']
-    rows_to_insert = [
-        {
-            'coingecko_id': json_data['id'],
-            'blockchain': blockchain,
-            'address': contracts[blockchain]['contract_address'],
-            'decimals': contracts[blockchain]['decimal_place'],
-            'coingecko_rank': i+1,
-            'updated_at': updated_at
-        }
-        for i, blockchain in enumerate(contracts.keys())
-    ]
+    contracts = json_data.get('detail_platforms', {})
+    coingecko_id = json_data.get('id')
 
-    insert_rows(bigquery_client, table_id, rows_to_insert)
+    if not contracts or not coingecko_id:
+        logger.info("No contracts or missing ID for coingecko_id: %s", coingecko_id)
+        return
+
+    rows_to_insert = []
+    for i, blockchain in enumerate(contracts.keys()):
+        contract_data = contracts[blockchain] or {}
+        if isinstance(contract_data, dict):  # Ensure we have a valid contract object
+            rows_to_insert.append({
+                'coingecko_id': coingecko_id,
+                'blockchain': blockchain,
+                'address': contract_data.get('contract_address'),
+                'decimals': contract_data.get('decimal_place'),
+                'coingecko_rank': i+1,
+                'updated_at': updated_at
+            })
+
+    if rows_to_insert:
+        insert_rows(bigquery_client, table_id, rows_to_insert)
 
 
 def insert_rows(client, table_id, rows_to_insert):
