@@ -400,7 +400,7 @@ def create_dune_new_coins_table():
     # make empty dune table
     dune = DuneClient.from_env()
 
-    table = dune.create_table(
+    _ = dune.create_table(
         namespace='dreamslabs',
         table_name='etl_new_erc20_coins',
         description='erc20 coins that do not have dune transfer data',

@@ -21,6 +21,11 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 
+
+# -----------------------------------
+#           Core Interface
+# -----------------------------------
+
 @functions_framework.http
 def freshen_existing_coin_wallet_net_transfers(request):  # pylint: disable=W0613
     """
@@ -105,6 +110,10 @@ def retrieve_existing_coin_freshness():
     return freshness_df
 
 
+
+# -----------------------------------
+#          Helper Functions
+# -----------------------------------
 
 def retrieve_new_coin_freshness(dune_chains=None, batch_size=1000000):
     """
@@ -202,6 +211,7 @@ def retrieve_new_coin_freshness(dune_chains=None, batch_size=1000000):
     logger.info('retrieved freshness data for %s tokens', freshness_df.shape[0])
 
     return freshness_df
+
 
 
 def update_dune_freshness_table(freshness_df):
@@ -612,29 +622,34 @@ def append_to_bigquery_table(freshness_df,transfers_df):
     logger.info('appended upload df to %s.', table_name)
 
 
-# def create_dune_freshness_table():
-#     """
-#     this is the code that was used to create dune.dreamslabs.etl_net_transfers_freshness.
-#     it is not intended to be reran as part of normal operations but is retained in case it needs
-#     to be referenced or altered.
-#
-#     params:
-#         none
-#     returns:
-#         none
-#     """
-#     # make empty dune table
-#     dune = DuneClient.from_env()
-#
-#     table = dune.create_table(
-#         namespace='dreamslabs',
-#         table_name='etl_net_transfers_freshness',
-#         description='coin wallet daily net transfer data freshness by chain and token address',
-#         schema= [
-#             {'name': 'chain', 'type': 'varchar'},
-#             {'name': 'token_address', 'type': 'varchar'},
-#             {'name': 'freshest_date', 'type': 'date'},
-#             {'name': 'updated_at', 'type': 'timestamp'},
-#         ],
-#         is_private=False
-#     )
+
+# -----------------------------------
+#         Utility Functions
+# -----------------------------------
+
+def create_dune_freshness_table():
+    """
+    this is the code that was used to create dune.dreamslabs.etl_net_transfers_freshness.
+    it is not intended to be reran as part of normal operations but is retained in case it needs
+    to be referenced or altered.
+
+    params:
+        none
+    returns:
+        none
+    """
+    # make empty dune table
+    dune = DuneClient.from_env()
+
+    table = dune.create_table(
+        namespace='dreamslabs',
+        table_name='etl_net_transfers_freshness',
+        description='coin wallet daily net transfer data freshness by chain and token address',
+        schema= [
+            {'name': 'chain', 'type': 'varchar'},
+            {'name': 'token_address', 'type': 'varchar'},
+            {'name': 'freshest_date', 'type': 'date'},
+            {'name': 'updated_at', 'type': 'timestamp'},
+        ],
+        is_private=False
+    )
