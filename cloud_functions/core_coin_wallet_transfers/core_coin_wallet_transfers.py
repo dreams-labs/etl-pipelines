@@ -172,7 +172,7 @@ def rebuild_core_coin_wallet_transfers():
     query_sql = """
         CREATE OR REPLACE TABLE core.coin_wallet_transfers
         PARTITION BY date(date)
-        CLUSTER BY token_address AS (
+        CLUSTER BY coin_id AS (
 
             with eth_transfers as (
                 select c.coin_id
