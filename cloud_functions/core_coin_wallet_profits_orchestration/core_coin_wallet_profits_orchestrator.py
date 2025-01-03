@@ -77,9 +77,9 @@ def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0
     return (
         {
             "status": "complete",
-            "batch_size": batch_size,
-            "max_workers": max_workers,
-            "total_batches": batch_count,
+            "batch_size": int(batch_size),
+            "max_workers": int(max_workers),
+            "total_batches": int(batch_count),
             "failed_batches": failed_batches
         },
         200
