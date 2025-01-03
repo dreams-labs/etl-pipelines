@@ -18,6 +18,14 @@ from dreams_core import core as dc
 # set up logger at the module level
 logger = dc.setup_logger()
 
+
+#
+# -----------------------------------
+#          Primary Function
+# -----------------------------------
+# Initiated by the parent core_coin_wallet_profits_orchestrator for
+# each batch
+
 @functions_framework.http
 def update_core_coin_wallet_profits(request):
     """
@@ -84,7 +92,7 @@ def update_core_coin_wallet_profits(request):
             "rows_processed": len(profits_df)
         }, 200
 
-    except Exception as e:
+    except Exception as e:  # pylint:disable=broad-exception-caught
         total_time = time.time() - start_time
         logger.error(f"Error processing batch {batch_number}: {str(e)}")
         return {
@@ -93,6 +101,11 @@ def update_core_coin_wallet_profits(request):
             "error": str(e)
         }, 500
 
+
+
+# -----------------------------------
+#          Support Functions
+# -----------------------------------
 
 def retrieve_transfers_data(batch_number=None):
     """
