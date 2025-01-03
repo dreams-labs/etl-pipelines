@@ -6,7 +6,6 @@ columns, int32, and dropping columns as soon as they are no longer needed.
 import time
 import gc
 import pandas as pd
-import numpy as np
 import functions_framework
 import pandas_gbq
 
@@ -104,7 +103,7 @@ def update_core_coin_wallet_profits(request):
 
 
 # -----------------------------------
-#                  Helper Functions
+#          Helper Functions
 # -----------------------------------
 
 def retrieve_transfers_data(batch_number=None):
@@ -558,7 +557,6 @@ def calculate_wallet_profitability(profits_df):
         - usd_net_transfers: The USD value of the net transfers on a given day.
         - usd_inflows: The USD value of net transfers into the wallet (positive transfers only).
         - usd_inflows_cumulative: The cumulative USD inflows for each wallet-coin pair.
-        - total_return: The total return, calculated as total profits divided by total USD inflows.
 
     Raises:
     - ValueError: If any missing prices are found in the `profits_df`.
@@ -628,11 +626,6 @@ def calculate_wallet_profitability(profits_df):
         .cumsum())
     profits_df = dc.safe_downcast(profits_df,'usd_inflows_cumulative')
 
-    profits_df['total_return'] = (profits_df['profits_cumulative']
-                                  / profits_df['usd_inflows_cumulative']
-                                  .where(profits_df['usd_inflows_cumulative'] != 0, np.nan))
-    profits_df = dc.safe_downcast(profits_df,'total_return')
-
     # Final recategorization
     profits_df['coin_id'] = profits_df['coin_id'].astype('category')
 
@@ -673,7 +666,6 @@ def upload_profits_data(profits_df,batch_number=None):
     profits_df['usd_net_transfers'] = profits_df['usd_net_transfers'].astype(float)
     profits_df['usd_inflows'] = profits_df['usd_inflows'].astype(float)
     profits_df['usd_inflows_cumulative'] = profits_df['usd_inflows_cumulative'].astype(float)
-    profits_df['total_return'] = profits_df['total_return'].astype(float)
 
     # Define the schema
     schema = [
@@ -686,7 +678,6 @@ def upload_profits_data(profits_df,batch_number=None):
         {'name': 'usd_net_transfers', 'type': 'FLOAT'},
         {'name': 'usd_inflows', 'type': 'FLOAT'},
         {'name': 'usd_inflows_cumulative', 'type': 'FLOAT'},
-        {'name': 'total_return', 'type': 'FLOAT'}
     ]
 
     # Upload df to BigQuery

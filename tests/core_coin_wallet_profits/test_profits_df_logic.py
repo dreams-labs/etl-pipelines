@@ -61,7 +61,6 @@ def test_calculate_wallet_profitability_basic(caplog):
     - profits_change = (current_price - previous_price) * previous_balance
     - profits_cumulative = running sum of profits_change
     - usd values are straightforward price * quantity calculations
-    - total_return = profits_cumulative / cumulative_inflows
 
     Parameters:
     -----------
@@ -122,9 +121,6 @@ def test_calculate_wallet_profitability_basic(caplog):
         'usd_inflows_cumulative': [
             100.0, 100.0, 100.0, 100.0
         ],
-        'total_return': [
-            0.0, 0.1, 0.2, 0.3  # profits_cumulative / inflows_cumulative
-        ]
     })
     expected_df['coin_id'] = expected_df['coin_id'].astype('category')
 
@@ -132,13 +128,12 @@ def test_calculate_wallet_profitability_basic(caplog):
     # Check that all expected columns exist
     expected_cols = {'coin_id', 'wallet_address', 'date', 'profits_change',
                     'profits_cumulative', 'usd_balance', 'usd_net_transfers',
-                    'usd_inflows', 'usd_inflows_cumulative', 'total_return'}
+                    'usd_inflows', 'usd_inflows_cumulative'}
     assert set(result_df.columns) == expected_cols, "Missing or extra columns in result"
 
     # Compare numeric columns
     numeric_cols = ['profits_change', 'profits_cumulative', 'usd_balance',
-                    'usd_net_transfers', 'usd_inflows', 'usd_inflows_cumulative',
-                    'total_return']
+                    'usd_net_transfers', 'usd_inflows', 'usd_inflows_cumulative']
     for col in numeric_cols:
         assert np.allclose(result_df[col], expected_df[col],
                             equal_nan=True), f"Mismatch in {col} values"
@@ -161,14 +156,6 @@ def test_calculate_wallet_profitability_basic(caplog):
         result_df['usd_inflows'].cumsum(),
         equal_nan=True
     ), "usd_inflows_cumulative should be cumsum of usd_inflows"
-
-    # Verify total_return calculation
-    expected_return = (result_df['profits_cumulative'] /
-                        result_df['usd_inflows_cumulative'].where(
-                            result_df['usd_inflows_cumulative'] != 0, np.nan))
-    assert np.allclose(result_df['total_return'],
-                        expected_return,
-                        equal_nan=True), "total_return calculation incorrect"
 
 
 @pytest.mark.unit
@@ -274,13 +261,6 @@ def test_calculate_wallet_profitability_complex(caplog):
             140.0,  # No change
             158.0,  # Added Day 4 purchase
             158.0   # No change
-        ],
-        'total_return': [
-            0.0,    # 0 / 100
-            -0.143, # -20 / 140
-            0.286,  # 40 / 140
-            0.025,  # 4 / 158
-            0.203   # 32 / 158
         ]
     })
     expected_df['coin_id'] = expected_df['coin_id'].astype('category')
@@ -289,7 +269,7 @@ def test_calculate_wallet_profitability_complex(caplog):
     # Check that all expected columns exist
     expected_cols = {'coin_id', 'wallet_address', 'date', 'profits_change',
                     'profits_cumulative', 'usd_balance', 'usd_net_transfers',
-                    'usd_inflows', 'usd_inflows_cumulative', 'total_return'}
+                    'usd_inflows', 'usd_inflows_cumulative'}
     assert set(result_df.columns) == expected_cols, "Missing or extra columns in result"
 
     # Compare numeric columns
@@ -298,10 +278,6 @@ def test_calculate_wallet_profitability_complex(caplog):
     for col in numeric_cols:
         assert np.allclose(result_df[col], expected_df[col],
                             equal_nan=True), f"Mismatch in {col} values"
-
-    # Compare total_return with tolerance due to potential floating point differences
-    assert np.allclose(result_df['total_return'], expected_df['total_return'],
-                        rtol=1e-1, equal_nan=True), "Mismatch in total_return values"
 
     # Verify running sum relationships
     assert np.allclose(
@@ -460,17 +436,13 @@ def test_calculate_wallet_profitability_edge_cases(caplog):
         ]
     })
 
-    # Calculate total_return separately to handle division by zero
-    expected_df['total_return'] = expected_df['profits_cumulative'] / \
-                                    expected_df['usd_inflows_cumulative']
-
     expected_df['coin_id'] = expected_df['coin_id'].astype('category')
 
     # Verify results
     # Check that all expected columns exist
     expected_cols = {'coin_id', 'wallet_address', 'date', 'profits_change',
                     'profits_cumulative', 'usd_balance', 'usd_net_transfers',
-                    'usd_inflows', 'usd_inflows_cumulative', 'total_return'}
+                    'usd_inflows', 'usd_inflows_cumulative'}
     assert set(result_df.columns) == expected_cols, "Missing or extra columns in result"
 
     # Compare numeric columns with appropriate tolerances for different scales
@@ -486,14 +458,7 @@ def test_calculate_wallet_profitability_edge_cases(caplog):
                             rtol=1e-4, atol=1e-6, equal_nan=True), \
             f"Mismatch in {col} values"
 
-    # Verify total_return with appropriate tolerance
-    assert np.allclose(
-        result_df['total_return'],
-        expected_df['total_return'],
-        rtol=1e-4, atol=1e-6, equal_nan=True
-    ), "Mismatch in total_return values"
-
-    # Verify no infinity or NaN values (except where expected in total_return)
+    # Verify no infinity or NaN values
     numeric_cols = ['profits_change', 'profits_cumulative', 'usd_balance',
                     'usd_net_transfers', 'usd_inflows', 'usd_inflows_cumulative']
     for col in numeric_cols:
@@ -595,21 +560,6 @@ def test_wallet1_coin1_profitability(pipeline_result_df, caplog):
         equal_nan=True
     ), "Cumulative USD inflow tracking incorrect"
 
-    # Verify total return (profits_cumulative / cumulative_inflows)
-    expected_total_return = [
-        0.0,             # 0.0 / 120.0
-        0.0845,          # 12.0 / 142.0
-        0.1831,          # 26.0 / 142.0
-        0.1479,          # 21.0 / 142.0
-        0.2006           # 31.0 / 154.5
-    ]
-    assert np.allclose(
-        result_df['total_return'],
-        expected_total_return,
-        rtol=1e-3,
-        equal_nan=True
-    ), "Total return calculations incorrect"
-
 
 @pytest.mark.integration
 def test_wallet1_coin2_profitability(pipeline_result_df, caplog):
@@ -688,19 +638,6 @@ def test_wallet1_coin2_profitability(pipeline_result_df, caplog):
         expected_usd_inflows_cumulative,
         equal_nan=True
     ), "Cumulative USD inflow tracking incorrect"
-
-    # Verify total return
-    expected_total_return = [
-        0.0,             # 0.0 / 360.0
-        0.2222,          # 80.0 / 360.0
-        0.0859           # 35.0 / 407.5
-    ]
-    assert np.allclose(
-        result_df['total_return'],
-        expected_total_return,
-        rtol=1e-3,
-        equal_nan=True
-    ), "Total return calculations incorrect"
 
 
 @pytest.mark.integration
@@ -783,18 +720,6 @@ def test_wallet2_coin1_profitability(pipeline_result_df, caplog):
         equal_nan=True
     ), "Cumulative USD inflow tracking incorrect"
 
-    # Verify total return
-    expected_total_return = [
-        0.0,             # 0.0 / 150.0
-        0.1000,          # 15.0 / 150.0
-        0.1389           # 25.0 / 180.0
-    ]
-    assert np.allclose(
-        result_df['total_return'],
-        expected_total_return,
-        rtol=1e-3,
-        equal_nan=True
-    ), "Total return calculations incorrect"
 
 @pytest.mark.integration
 def test_wallet2_coin2_profitability(pipeline_result_df, caplog):
@@ -885,19 +810,6 @@ def test_wallet2_coin2_profitability(pipeline_result_df, caplog):
         equal_nan=True
     ), "Cumulative USD inflow tracking incorrect"
 
-    # Verify total return
-    expected_total_return = [
-        0.0,             # 0.0 / 200.0
-        -0.0690,         # -20.0 / 290.0
-        0.1379,          # 40.0 / 290.0
-        0.0925           # 40.0 / 432.5
-    ]
-    assert np.allclose(
-        result_df['total_return'],
-        expected_total_return,
-        rtol=1e-3,
-        equal_nan=True
-    ), "Total return calculations incorrect"
 
 @pytest.mark.integration
 def test_wallet3_coin1_profitability(pipeline_result_df, caplog):
@@ -977,15 +889,6 @@ def test_wallet3_coin1_profitability(pipeline_result_df, caplog):
         expected_usd_inflows_cumulative,
         equal_nan=True
     ), "Cumulative USD inflow tracking incorrect"
-
-    # Verify total return
-    expected_total_return = [0.0]  # 0.0 / 60.0
-    assert np.allclose(
-        result_df['total_return'],
-        expected_total_return,
-        rtol=1e-3,
-        equal_nan=True
-    ), "Total return calculations incorrect"
 
 
 @pytest.mark.integration
