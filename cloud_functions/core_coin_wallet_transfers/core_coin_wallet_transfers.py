@@ -259,6 +259,13 @@ def rebuild_core_coin_wallet_transfers():
                     -- contract addresses from `bigquery-public-data.crypto_ethereum.contracts`
                     select lower(address) as address
                     from `reference.addresses_ethereum_contracts`
+
+                    union all
+
+                    -- 0x000000000s are almost definitely not normal investors
+                    select wallet_address
+                    from all_transfers t
+                    where wallet_address like '0x000000000%'
                 )
                 group by 1
             ),
