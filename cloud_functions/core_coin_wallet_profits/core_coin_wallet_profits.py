@@ -18,7 +18,6 @@ from dreams_core import core as dc
 logger = dc.setup_logger()
 
 
-#
 # -----------------------------------
 #          Primary Function
 # -----------------------------------
