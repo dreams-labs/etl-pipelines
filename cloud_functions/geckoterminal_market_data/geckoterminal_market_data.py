@@ -166,7 +166,7 @@ def make_api_request(endpoint_type: str, **params) -> requests.Response:
             },
             'endpoints': {
                 'token': "/networks/{blockchain}/tokens/{address}",
-                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day?limit=1000"
+                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day?limit=3650"
             }
         }
     else:
@@ -175,7 +175,7 @@ def make_api_request(endpoint_type: str, **params) -> requests.Response:
             'headers': {},
             'endpoints': {
                 'token': "/networks/{blockchain}/tokens/{address}",
-                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day?limit=1000"
+                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day?limit=3650"
             }
         }
 
