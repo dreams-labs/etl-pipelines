@@ -166,7 +166,7 @@ def make_api_request(endpoint_type: str, **params) -> requests.Response:
             },
             'endpoints': {
                 'token': "/networks/{blockchain}/tokens/{address}",
-                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day?limit=3650"
+                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day?limit=1000"
             }
         }
     else:
@@ -175,7 +175,7 @@ def make_api_request(endpoint_type: str, **params) -> requests.Response:
             'headers': {},
             'endpoints': {
                 'token': "/networks/{blockchain}/tokens/{address}",
-                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day?limit=3650"
+                'ohlcv': "/networks/{blockchain}/pools/{pool_address}/ohlcv/day?limit=1000"
             }
         }
 
@@ -327,7 +327,7 @@ def retrieve_market_data_for_pool(pair):
         filename = f"{blockchain}_{token_address}_{filename_datetime}.json"
         dgc().gcs_upload_file(
             data, gcs_folder='data_lake/geckoterminal_market_data', filename=filename)
-        logger.debug("Stored valid API response data for %s:%s.", blockchain, token_address)
+        logger.info("Stored valid API response data for %s:%s.", blockchain, token_address)
 
         # Process the valid response into a dataframe
         if len(data["data"]["attributes"]["ohlcv_list"]) > 0:
