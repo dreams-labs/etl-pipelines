@@ -224,7 +224,7 @@ def update_dune_freshness_table(freshness_df):
         for update
     """
     # define dune upload
-    dune_df = freshness_df[['chain', 'token_address', 'freshest_date']]
+    dune_df = freshness_df[['chain', 'token_address', 'freshest_date']].copy()
     dune_df['updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
 
     # store df locally
