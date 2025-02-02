@@ -348,7 +348,7 @@ def format_and_add_columns(df, coingecko_id, dates_with_records):
     df.columns = ['coingecko_id', 'date', 'price', 'market_cap', 'volume']
 
     # Convert market_cap and volumes to integers
-    df['market_cap'] = df['market_cap'].astype(int)
+    df['market_cap'] = df['market_cap'].apply(lambda x: int(round(x)) if pd.notna(x) else x)
     df['volume'] = df['volume'].astype(int)
 
     # Convert date column to UTC datetime
