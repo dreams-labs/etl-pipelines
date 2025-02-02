@@ -81,6 +81,8 @@ def retrieve_raw_market_data():
                 )
                 and price = 0
             )
+            -- there are some 2019 records for ('afin-coin','kryll','dprating') that have negative volume
+            and volume > 0
         ),
 
         geckoterminal_market_data as (
