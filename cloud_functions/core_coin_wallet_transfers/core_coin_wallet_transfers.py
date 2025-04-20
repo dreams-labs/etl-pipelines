@@ -450,7 +450,9 @@ def create_wallet_coin_id_table():
             select cwt.wallet_address,
             wi.wallet_id,
             coin_id,
-            DENSE_RANK() OVER (ORDER BY cwt.wallet_address,cwt.coin_id) as hybrid_cw_id,
+            DENSE_RANK() OVER (ORDER BY cwt.wallet_address,cwt.coin_id)
+                + 3e9  -- add 3e9 so IDs are visibly distinct from base IDs
+                as hybrid_cw_id,
             current_datetime('UTC') as updated_at
             from (
                 select wallet_address,
