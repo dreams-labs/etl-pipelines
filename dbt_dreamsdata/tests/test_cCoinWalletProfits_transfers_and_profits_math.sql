@@ -117,8 +117,10 @@ where (
         AND (abs(usd_balance_diff / greatest(expected_usd_balance,prev_usd_balance)) > 0.01)
     )
 OR
-    ( -- select rows where profits_change was off by more than $1 and 1%
-        abs(profits_change_diff) > 1
-        AND (abs(profits_change_diff / profits_change) > 0.01)
-    )
+    case when profits_change != 0 then
+        ( -- select rows where profits_change was off by more than $1 and 1%
+            abs(profits_change_diff) > 1
+            AND (abs(profits_change_diff / profits_change) > 0.01)
+        )
+    else False end
 )
