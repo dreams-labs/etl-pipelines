@@ -48,7 +48,7 @@ def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0
     failed_batches = []
 
     # Sequence to initiate multithreaded function calls for multiple batches with retries
-    max_retries = 3
+    max_retries = 5
     batches_to_process = list(range(batch_count))
     all_failed_batches = []
 

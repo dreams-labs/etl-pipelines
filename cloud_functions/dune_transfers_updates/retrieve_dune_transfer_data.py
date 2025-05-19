@@ -100,7 +100,7 @@ def retrieve_existing_coin_freshness():
         from etl_pipelines.coin_wallet_net_transfers
         where data_source = 'dune'
         -- all ethereum transfers are sourced from the public ethereum transfers table
-        and chain_text_source not in ('ethereum','solana')
+        and chain_text_source not in ('ethereum') --,'solana')  #dunesolana
         group by 1,2,3
         """
     freshness_df = dgc().run_sql(query_sql)
@@ -180,7 +180,7 @@ def retrieve_new_coin_freshness(dune_chains=None, batch_size=1000000):
             -- do not update solana tokens with negative wallets per dune data
             -- source: https://dune.com/queries/4094516
             -- dune github ticket: https://github.com/duneanalytics/spellbook/issues/6690
-            and c.chain not in ('Ethereum','Solana')
+            and c.chain not in ('Ethereum') --,'Solana')  #dunesolana
 
             -- remove coins with existing transfer data
             and e.token_address is null

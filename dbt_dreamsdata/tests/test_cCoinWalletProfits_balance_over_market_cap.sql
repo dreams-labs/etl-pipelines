@@ -1,5 +1,7 @@
 -- Coins that have many wallets with USD balance above the market cap are
--- usually caused by bad market cap data but could use more review
+--  usually caused by bad market cap data but could use more review
+--  e.g. market cap chart of https://www.coingecko.com/en/coins/pixer-eternity
+--  e.g. market cap chart of https://www.coingecko.com/en/coins/tokoin
 {{ config(
     severity = 'warn'
 ) }}
