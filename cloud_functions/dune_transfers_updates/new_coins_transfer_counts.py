@@ -144,7 +144,7 @@ def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts
             -- all ethereum transfers are sourced from the public ethereum transfers table
             -- Dune Solana data is suspect
             -- now includes polygon due to expected integration w bigquery blockchain
-            and c.chain not in ('Ethereum','Solana','Polygon')
+            and c.chain not in ('Ethereum') --,'Solana','Polygon')  #dunesolana
 
             -- new coins don't have existing transfer data
             and e.token_address is null
@@ -289,7 +289,8 @@ def generate_erc_20_counts_query(dune_chains):
 
         # Solana is not ERC20
         if chain_text_dune=='solana':
-            continue
+            query_ctes = ''
+            query_selects = generate_solana_counts_query(dune_chains)
 
         # The first queries shouldn't have a UNION appended to them
         if not query_ctes:
@@ -305,6 +306,94 @@ def generate_erc_20_counts_query(dune_chains):
     logger.info('generated full transfer count query.')
 
     return full_query
+
+
+
+def generate_solana_counts_query(dune_chains):
+    """Query to extract day-coin-wallet rows associated with Solana tokens"""
+    if len(dune_chains) != 1 or dune_chains[0] != 'solana':
+        raise ValueError("Solana query can only be triggered for chain 'solana'.")
+
+    sol_query = """
+        --  retrieving the most recent batch of bigquery records available in dune
+        with current_net_transfers_freshness as (
+            select chain
+            ,token_address
+            ,freshest_date
+            ,updated_at
+            from (
+                select *
+                ,rank() over (order by updated_at desc) as batch_recency
+                from dune.dreamslabs.etl_net_transfers_freshness t
+            )
+            where batch_recency = 1
+        ),
+
+        -- filter transfers on index (block_date) to improve query performance
+        transfers_filtered as (
+            -- find the earliest possible date that we need data for
+            with most_out_of_date as (
+                select min(cast(ts.freshest_date as date)) as date
+                from current_net_transfers_freshness ts
+                where ts.chain = 'solana'
+            )
+            select 'solana' as chain
+            ,t.block_date
+            ,t.from_token_account
+            ,t.to_token_account
+            ,t.token_mint_address
+            ,t.amount
+            from tokens_solana.transfers t
+            -- remove all rows earlier than the earliest possible relevant date
+            where t.block_date > (select date from most_out_of_date)
+            -- remove rows from today since the daily net totals aren't finalized
+            and t.block_date < date(current_timestamp at time zone 'UTC')
+        ),
+        transfers as (
+            select t.chain
+            ,t.block_date as date
+            ,t.from_token_account as address
+            ,-cast(t.amount as double) as amount
+            ,token_mint_address as contract_address
+            from transfers_filtered t
+            join current_net_transfers_freshness ts
+                on ts.token_address = t.token_mint_address
+                and ts.chain = t.chain
+                and t.block_date > cast(ts.freshest_date as date)
+
+            union all
+
+            select t.chain
+            ,t.block_date as date
+            ,t.to_token_account as address
+            ,cast(t.amount as double) as amount
+            ,token_mint_address as contract_address
+            from transfers_filtered t
+            join current_net_transfers_freshness ts
+                on ts.token_address = t.token_mint_address
+                and ts.chain = t.chain
+                and t.block_date > cast(ts.freshest_date as date)
+        ),
+        daily_net_transfers as (
+            select chain
+            ,date
+            ,address
+            ,contract_address
+            ,sum(amount) as amount
+            from transfers
+            group by 1,2,3,4
+        )
+
+        select chain
+        ,contract_address
+        ,count(date) as transfer_records
+        from daily_net_transfers
+        group by 1,2
+        order by 3 asc
+        """
+
+    return sol_query
+
 
 
 def get_dune_transfer_counts(new_coins_query):
