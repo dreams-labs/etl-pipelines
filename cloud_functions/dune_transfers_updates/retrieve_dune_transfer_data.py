@@ -115,7 +115,7 @@ def retrieve_existing_coin_freshness():
 #          Helper Functions
 # -----------------------------------
 
-def retrieve_new_coin_freshness(dune_chains=None):
+def retrieve_new_coin_freshness(dune_chains=None, batch_size=1000000):
     """
     Retrieves a df containing the coins that will have their full history retrieved from Dune.
 
@@ -202,6 +202,10 @@ def retrieve_new_coin_freshness(dune_chains=None):
         ,transfer_records
         ,records_running_total
         from new_records
+
+        -- custom filters
+        where records_running_total between 1 and {batch_size}
+        order by transfer_records desc
         """
     freshness_df = dgc().run_sql(query_sql)
     logger.info('retrieved freshness data for %s tokens', freshness_df.shape[0])
