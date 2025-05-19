@@ -52,7 +52,10 @@ def orchestrate_dune_transfer_counts(dune_chains: list, coin_limit: int = 500,
 
         # Step 3: Generate and execute transfer counting query
         logger.info("Generating transfer count query...")
-        count_query = generate_erc_20_counts_query(dune_chains)
+        if len(dune_chains) == 1 and dune_chains[0] == 'solana':
+            count_query = generate_solana_counts_query(dune_chains)
+        else:
+            count_query = generate_erc_20_counts_query(dune_chains)
 
         logger.info("Executing Dune query for transfer counts...")
         transfer_counts_df = get_dune_transfer_counts(count_query)
@@ -177,7 +180,7 @@ def retrieve_new_coins_list(dune_chains, coin_limit=500, refresh_existing_counts
 
 def load_new_coins_to_dune(new_coins_df):
     """
-    Updates the Dune table etl_new_erc20_coins with all coins that don't have any
+    Updates the Dune table etl_new_transfers_coins with all coins that don't have any
     Dune transfer records.
 
     Params:
@@ -195,7 +198,7 @@ def load_new_coins_to_dune(new_coins_df):
     with open(local_csv, "rb") as data:
         response = dune.insert_table(
                     namespace='dreamslabs',
-                    table_name='etl_new_erc20_coins',
+                    table_name='etl_new_transfers_coins',
                     data=data,
                     content_type='text/csv'
                 )
@@ -230,7 +233,7 @@ def generate_erc_20_counts_query(dune_chains):
                 from (
                     select *
                     ,rank() over (order by updated_at desc) as batch_recency
-                    from dune.dreamslabs.etl_new_erc20_coins t
+                    from dune.dreamslabs.etl_new_transfers_coins t
                 )
                 where batch_recency = 1
             ),
@@ -315,28 +318,20 @@ def generate_solana_counts_query(dune_chains):
         raise ValueError("Solana query can only be triggered for chain 'solana'.")
 
     sol_query = """
-        --  retrieving the most recent batch of bigquery records available in dune
-        with current_net_transfers_freshness as (
+        with new_coin_batch as (
             select chain
-            ,token_address
-            ,freshest_date
+            ,token_address as token_address
             ,updated_at
             from (
                 select *
                 ,rank() over (order by updated_at desc) as batch_recency
-                from dune.dreamslabs.etl_net_transfers_freshness t
+                from dune.dreamslabs.etl_new_transfers_coins t
             )
             where batch_recency = 1
+            and chain = 'solana'
         ),
-
         -- filter transfers on index (block_date) to improve query performance
         transfers_filtered as (
-            -- find the earliest possible date that we need data for
-            with most_out_of_date as (
-                select min(cast(ts.freshest_date as date)) as date
-                from current_net_transfers_freshness ts
-                where ts.chain = 'solana'
-            )
             select 'solana' as chain
             ,t.block_date
             ,t.from_token_account
@@ -344,8 +339,7 @@ def generate_solana_counts_query(dune_chains):
             ,t.token_mint_address
             ,t.amount
             from tokens_solana.transfers t
-            -- remove all rows earlier than the earliest possible relevant date
-            where t.block_date > (select date from most_out_of_date)
+            join new_coin_batch nc on nc.token_address = t.token_mint_address
             -- remove rows from today since the daily net totals aren't finalized
             and t.block_date < date(current_timestamp at time zone 'UTC')
         ),
@@ -356,10 +350,6 @@ def generate_solana_counts_query(dune_chains):
             ,-cast(t.amount as double) as amount
             ,token_mint_address as contract_address
             from transfers_filtered t
-            join current_net_transfers_freshness ts
-                on ts.token_address = t.token_mint_address
-                and ts.chain = t.chain
-                and t.block_date > cast(ts.freshest_date as date)
 
             union all
 
@@ -369,10 +359,6 @@ def generate_solana_counts_query(dune_chains):
             ,cast(t.amount as double) as amount
             ,token_mint_address as contract_address
             from transfers_filtered t
-            join current_net_transfers_freshness ts
-                on ts.token_address = t.token_mint_address
-                and ts.chain = t.chain
-                and t.block_date > cast(ts.freshest_date as date)
         ),
         daily_net_transfers as (
             select chain
@@ -417,7 +403,7 @@ def get_dune_transfer_counts(new_coins_query):
         query_id=query_id,
     )
     # Run Dune query and load to a dataframe
-    logger.info('fetching fresh dune data...')
+    logger.info('Fetching fresh dune data...')
     transfer_counts_df = dune.run_query_dataframe(
         transfers_query,
         performance='large',
@@ -477,7 +463,7 @@ def upload_transfer_counts(transfer_counts_df):
 
 def create_dune_new_coins_table():
     """
-    this is the code that was used to create dune.dreamslabs.etl_new_erc20_coins.
+    this is the code that was used to create dune.dreamslabs.etl_new_transfers_coins.
     it is not intended to be reran as part of normal operations but is retained in case it needs
     to be referenced or altered.
 
@@ -491,7 +477,7 @@ def create_dune_new_coins_table():
 
     _ = dune.create_table(
         namespace='dreamslabs',
-        table_name='etl_new_erc20_coins',
+        table_name='etl_new_transfers_coins',
         description='erc20 coins that do not have dune transfer data',
         schema= [
             {'name': 'chain', 'type': 'varchar'},
