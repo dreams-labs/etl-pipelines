@@ -44,8 +44,8 @@ def update_core_coin_wallet_transfers(request):  # pylint: disable=W0613
     )
 
     # rebuild address to ID mapping tables
-    create_wallet_id_table()
-    create_wallet_coin_id_table()
+    update_wallet_id_table()
+    update_wallet_coin_id_table()
 
     return ({
         'message': 'rebuild of core.coin_wallet_transfers complete.',
@@ -409,61 +409,73 @@ def rebuild_core_coin_wallet_transfers():
     return counts_df
 
 
-def create_wallet_id_table():
+def update_wallet_id_table():
     """
-    Creates a reference table that maps each wallet_address to an integer ID. This is
-    useful in Python pipelines because the integers are much more memory efficient.
+    Creates/updates a reference table that maps each wallet_address to a permanent integer ID.
+    Preserves existing IDs and only assigns new ones to previously unseen wallet addresses.
     """
 
     mapping_sql = """
-        create or replace table reference.wallet_ids
-        cluster by wallet_address
-        as (
-            select wallet_address,
-            DENSE_RANK() OVER (ORDER BY wallet_address) as wallet_id,
-            current_datetime('UTC') as updated_at
-            from (
-                select wallet_address
-                from core.coin_wallet_transfers
-                group by 1
-            )
+        create table if not exists reference.wallet_ids (
+            wallet_address string,
+            wallet_id int64,
+            updated_at datetime
         )
-        ;
+        cluster by wallet_address;
+
+        insert into reference.wallet_ids (wallet_address, wallet_id, updated_at)
+        select
+            new_wallets.wallet_address,
+            row_number() over (order by new_wallets.wallet_address) +
+                coalesce((select max(wallet_id) from reference.wallet_ids), 0) as wallet_id,
+            current_datetime('UTC') as updated_at
+        from (
+            select wallet_address
+            from core.coin_wallet_transfers
+            group by 1
+        ) new_wallets
+        left join reference.wallet_ids existing
+            on new_wallets.wallet_address = existing.wallet_address
+        where existing.wallet_address is null;
         """
 
     _ = dgc().run_sql(mapping_sql)
-
-    logger.info("Rebuilt reference.wallet_ids.")
-
+    logger.info("Added new wallet addresses to reference.wallet_ids.")
 
 
-def create_wallet_coin_id_table():
+
+def update_wallet_coin_id_table():
     """
-    Creates a reference table that maps each wallet_address to an integer ID. This is
-    useful in Python pipelines because the integers are much more memory efficient.
+    Creates/updates a reference table that maps each wallet_address + coin_id pair to a permanent integer ID.
+    Preserves existing IDs and only assigns new ones to previously unseen wallet-coin pairs.
     """
 
     mapping_sql = """
-        create or replace table reference.wallet_coin_ids
-        cluster by wallet_address,coin_id
-        as (
-            select cwt.wallet_address,
-            wi.wallet_id,
-            coin_id,
-            DENSE_RANK() OVER (ORDER BY cwt.wallet_address,cwt.coin_id)
-                + 3e9  -- add 3e9 so IDs are visibly distinct from base IDs
-                as hybrid_cw_id,
+        create table if not exists reference.wallet_coin_ids (
+            wallet_address string,
+            coin_id string,
+            hybrid_cw_id int64,
+            updated_at datetime
+        )
+        cluster by wallet_address, coin_id;
+
+        insert into reference.wallet_coin_ids (wallet_address, coin_id, hybrid_cw_id, updated_at)
+        select
+            new_pairs.wallet_address,
+            new_pairs.coin_id,
+            row_number() over (order by new_pairs.wallet_address, new_pairs.coin_id) +
+                coalesce((select max(hybrid_cw_id) from reference.wallet_coin_ids), 3000000000) as hybrid_cw_id,
             current_datetime('UTC') as updated_at
-            from (
-                select wallet_address,
-                coin_id
-                from core.coin_wallet_transfers
-                group by 1,2
-            ) cwt
-            join reference.wallet_ids wi on wi.wallet_address = cwt.wallet_address
-        );
+        from (
+            select wallet_address, coin_id
+            from core.coin_wallet_transfers
+            group by 1, 2
+        ) new_pairs
+        left join reference.wallet_coin_ids existing
+            on new_pairs.wallet_address = existing.wallet_address
+            and new_pairs.coin_id = existing.coin_id
+        where existing.wallet_address is null;
         """
 
     _ = dgc().run_sql(mapping_sql)
-
-    logger.info("Rebuilt reference.wallet_coin_ids.")
+    logger.info("Added new wallet-coin pairs to reference.wallet_coin_ids.")
