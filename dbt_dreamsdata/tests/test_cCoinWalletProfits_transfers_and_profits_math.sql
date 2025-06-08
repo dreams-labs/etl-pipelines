@@ -5,7 +5,7 @@ price data is available. As these records exist in coin_wallet_profits but not
 coin_wallet_transfers, they will be removed by the cwt to cwp join.
 
 Tests alignment of USD balance calculations with profits and transfers. Logic flow:
-1. Samples 50 random coins to limit compute
+1. Samples 300 random coins to limit compute
 2. Establishes data freshness cutoff (10 days from latest data) to avoid imputed prices
 3. Joins core tables and calculates lagged values for comparison
 4. Computes expected vs actual values for:
@@ -19,7 +19,7 @@ with coin_sample as (
     select coin_id
     from {{ ref('coins') }}
     ORDER BY farm_fingerprint(concat('seed42', coin_id))
-    limit 300
+    limit 300 -- limit determines the sample size
 )
 
 -- select data that is at least 10 days old. if coin_market_data has been updated since
