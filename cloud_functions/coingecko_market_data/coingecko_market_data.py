@@ -47,7 +47,8 @@ def update_coin_market_data_coingecko(request):
     """
     # Get parameters from request with defaults
     batch_size = int(request.args.get('batch_size', 100))
-    max_workers = int(request.args.get('max_workers', 5))
+    max_workers = int(request.args.get('max_workers', 2))
+    history_days = int(request.args.get('history_days', 3650))
     retry_recent_searches = request.args.get('retry_recent_searches', False)
 
     logger.info(f'Starting update with batch_size={batch_size}, max_workers={max_workers}')
@@ -68,7 +69,7 @@ def update_coin_market_data_coingecko(request):
 
     # Process batches concurrently
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_batch = {executor.submit(process_coin_batch, batch, client): i
+        future_to_batch = {executor.submit(process_coin_batch, batch, client, history_days): i
                           for i, batch in enumerate(batches)}
 
         for future in concurrent.futures.as_completed(future_to_batch):
@@ -162,7 +163,7 @@ def retrieve_updates_df(retry_recent_searches=False):
 
 
 
-def process_coin_batch(coin_batch_df, client):
+def process_coin_batch(coin_batch_df, client, history_days):
     """
     Process a batch of coins and upload their combined market data to BigQuery
 
@@ -185,7 +186,7 @@ def process_coin_batch(coin_batch_df, client):
                 dates_with_records = pd.Series([date for date in dates_with_records])
                 dates_with_records = pd.to_datetime(dates_with_records).dt.tz_localize('UTC')
 
-            api_market_df, api_status_code = retrieve_coingecko_market_data(coingecko_id)
+            api_market_df, api_status_code = retrieve_coingecko_market_data(coingecko_id, history_days)
 
             if api_status_code == 200 and not api_market_df.empty:
                 market_df, new_row_count = format_and_add_columns(api_market_df, coingecko_id, dates_with_records)
@@ -228,7 +229,7 @@ def process_coin_batch(coin_batch_df, client):
 
 
 
-def retrieve_coingecko_market_data(coingecko_id):
+def retrieve_coingecko_market_data(coingecko_id, history_days):
     """
     Attempts to retrieve data from coingecko API with exponential backoff.
 
@@ -244,7 +245,7 @@ def retrieve_coingecko_market_data(coingecko_id):
     retry_attempts = 5
 
     for attempt in range(retry_attempts):
-        market_df, api_status_code = ping_coingecko_api(coingecko_id)
+        market_df, api_status_code = ping_coingecko_api(coingecko_id, history_days)
 
         if api_status_code == 200:
             break
@@ -378,7 +379,7 @@ def format_and_add_columns(df, coingecko_id, dates_with_records):
 
 
 
-def ping_coingecko_api(coingecko_id):
+def ping_coingecko_api(coingecko_id, history_days):
     """
     requests market data for a given coingecko_id.
 
@@ -395,7 +396,8 @@ def ping_coingecko_api(coingecko_id):
     """
     coingecko_api_key = os.getenv('COINGECKO_API_KEY')
 
-    url = f'https://pro-api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?vs_currency=usd&days=3650&interval=daily' # pylint: disable=C0301
+    url = (f'https://pro-api.coingecko.com/api/v3/coins/{coingecko_id}/market_chart?'
+           f'vs_currency=usd&days={history_days}&interval=daily')
 
     headers = {
         "accept": "application/json",
