@@ -461,7 +461,7 @@ def generate_net_transfers_update_query(dune_chains):
 
     # Combine CTEs and select statements into one big query
     full_query = query_ctes+query_selects
-    logger.info('generated full query.')
+    logger.info(f"Generated Dune query for chains: {dune_chains}")
 
     return full_query
 
