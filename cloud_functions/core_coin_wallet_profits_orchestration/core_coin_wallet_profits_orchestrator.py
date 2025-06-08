@@ -6,6 +6,7 @@ import os
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 import requests
+from requests.adapters import HTTPAdapter
 import functions_framework
 import google.auth
 import google.oauth2.id_token
@@ -46,29 +47,46 @@ def orchestrate_core_coin_wallet_profits_rebuild(request):  # pylint: disable=W0
     session = get_auth_session(worker_url)
     failed_batches = []
 
-    # Sequence to initiate multithreaded function calls for multiple batches at once
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_to_batch = {
-            executor.submit(process_single_batch, batch, session, worker_url): batch
-            for batch in range(batch_count)
-        }
+    # Sequence to initiate multithreaded function calls for multiple batches with retries
+    max_retries = 5
+    batches_to_process = list(range(batch_count))
+    all_failed_batches = []
 
-        for future in concurrent.futures.as_completed(future_to_batch):
-            batch = future_to_batch[future]
-            try:
-                result = future.result()
-                logger.info(f"Completed batch {result['batch']}")
-            except BatchProcessingError as e:
-                # Handle our custom batch processing errors
-                logger.error("Batch processing error: %s", str(e))
-                failed_batches.append(batch)
-            except Exception as e: # pylint:disable=W0718  # general exception catch
-                # Keep general handler for unexpected errors
-                logger.error("Unexpected error in batch %d: %s", batch, str(e))
-                failed_batches.append(batch)
+    for attempt in range(1, max_retries + 1):
+        failed_batches = []
+        logger.info(f"Starting batch processing attempt {attempt} for batches: {batches_to_process}")
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_batch = {
+                executor.submit(process_single_batch, batch, session, worker_url): batch
+                for batch in batches_to_process
+            }
 
-    if failed_batches:
-        raise RuntimeError(f"Failed batches: {failed_batches}")
+            for future in concurrent.futures.as_completed(future_to_batch):
+                batch = future_to_batch[future]
+                try:
+                    result = future.result()
+                    logger.info(f"Completed batch {result['batch']}")
+                except BatchProcessingError as e:
+                    logger.error("Batch processing error on batch %s: %s", batch, str(e))
+                    failed_batches.append(batch)
+                except Exception as e:
+                    logger.error("Unexpected error in batch %d: %s", batch, str(e))
+                    failed_batches.append(batch)
+
+        if not failed_batches:
+            # All batches succeeded
+            batches_to_process = []
+            break
+
+        logger.info("Batches failed in attempt %s: %s", attempt, failed_batches)
+        if attempt < max_retries:
+            logger.info("Retrying failed batches in next attempt.")
+            batches_to_process = failed_batches
+        else:
+            all_failed_batches = failed_batches
+
+    if all_failed_batches:
+        raise RuntimeError(f"Failed batches after {max_retries} attempts: {all_failed_batches}")
 
     # 3. Rebuild core.coin_wallet_profits, optionally drop temp tables
     rebuild_core_table()
@@ -134,6 +152,11 @@ def get_auth_session(target_url):
     else:
         # Create a regular session
         session = requests.Session()
+
+        # Increase urllib3 connection‐pool to avoid “pool is full” warnings
+        adapter = HTTPAdapter(pool_connections=50, pool_maxsize=50)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
 
         # Get ID token for authentication
         auth_req = google.auth.transport.requests.Request()

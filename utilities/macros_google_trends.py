@@ -2,7 +2,7 @@ import pandas as pd
 import glob
 
 # Path to files
-file_path = 'datasets/google_trends/exports/*.csv'  # Adjust the path to where the files are located
+file_path = '../../../Local/datasets/macro_trends/google_trends/exports_250508/*.csv'  # Adjust the path to where the files are located
 
 # Load all CSV files
 files = glob.glob(file_path)
@@ -25,5 +25,5 @@ merged_df = pd.concat(dfs, axis=1).loc[:, ~pd.concat(dfs, axis=1).columns.duplic
 # print(merged_df.head())
 
 # Optionally save to CSV
-merged_df.to_csv('datasets/google_trends/google_trends.csv', index=False)
+merged_df.to_csv('../../../Local/datasets/macro_trends/google_trends/google_trends_merged_250508.csv', index=False)
 merged_df
