@@ -100,7 +100,7 @@ def retrieve_existing_coin_freshness():
         from etl_pipelines.coin_wallet_net_transfers
         where data_source = 'dune'
         -- all ethereum transfers are sourced from the public ethereum transfers table
-        and chain_text_source not in ('ethereum') --,'solana')  #dunesolana
+        and chain_text_source not in ('ethereum')
         group by 1,2,3
         """
     freshness_df = dgc().run_sql(query_sql)
@@ -177,10 +177,7 @@ def retrieve_new_coin_freshness(dune_chains=None, batch_size=1000000):
             and stables.coin_id is null
 
             -- all ethereum transfers are sourced from the public ethereum transfers table
-            -- do not update solana tokens with negative wallets per dune data
-            -- source: https://dune.com/queries/4094516
-            -- dune github ticket: https://github.com/duneanalytics/spellbook/issues/6690
-            and c.chain not in ('Ethereum') --,'Solana')  #dunesolana
+            and c.chain not in ('Ethereum')
 
             -- remove coins with existing transfer data
             and e.token_address is null
@@ -461,7 +458,7 @@ def generate_net_transfers_update_query(dune_chains):
 
     # Combine CTEs and select statements into one big query
     full_query = query_ctes+query_selects
-    logger.info('generated full query.')
+    logger.info(f"Generated Dune query for chains: {dune_chains}")
 
     return full_query
 
