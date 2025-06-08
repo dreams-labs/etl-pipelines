@@ -285,3 +285,28 @@ models:
         data_tests:
           - not_null
           - unique
+
+  - name: wallet_coin_ids
+    description: "mapping an integer ID to every coin-wallet pairing"
+    meta:
+      schema: reference
+    columns:
+      - name: wallet_address
+        description: "raw wallet address"
+        data_tests:
+          - not_null
+      - name: coin_id
+        description: "coin_id"
+        data_tests:
+          - not_null
+      - name: hybrid_cw_id
+        description: "unique ID associated with that coin-wallet pairing"
+        data_tests:
+          - not_null
+          - unique
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - wallet_address
+            - coin_id
+
