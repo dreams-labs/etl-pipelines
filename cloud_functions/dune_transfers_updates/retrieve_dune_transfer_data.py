@@ -35,46 +35,83 @@ def freshen_existing_coin_wallet_net_transfers(request):  # pylint: disable=W061
 
     try:
         # retrieve the list of coins that will be updated
-        freshness_df = retrieve_existing_coin_freshness()
+        freshness_df_full = retrieve_existing_coin_freshness()
 
-        # update the dune freshness table
-        update_dune_freshness_table(freshness_df)
+        # Define chain batches
+        chain_batches = [
+            ['solana'],
+            ['bnb'],
+            ['base'],
+            ['avalanche_c','arbitrum','polygon'],
+        ]
+        all_chains = list(freshness_df_full['chain'].drop_duplicates())
+        existing_chains = [chain for batch in chain_batches for chain in batch]
+        remaining_chains = list(set(all_chains) - set(existing_chains))
+        chain_batches.append(remaining_chains)
 
-        # generate the sql query needed to refresh the transfers table
-        update_chains = freshness_df['chain'].unique()
-        full_query = generate_net_transfers_update_query(update_chains)
+        # Initialize aggregated metrics
+        all_update_chains = []
+        total_tokens_updated = 0
+        total_transfers_processed = 0
+        total_successful_transfers = 0
+        total_failed_parse_count = 0
+        all_freshest_dates = {}
+        all_parse_errors = []
 
-        # retrieve the fresh dune data using the generated query
-        transfers_json_df = get_fresh_dune_data(full_query)
+        for chain_batch in chain_batches:
 
-        # convert the json column into a df
-        transfers_df, parse_errors_df = parse_transfers_json(transfers_json_df)
-        logger.info('completed translation from dune export json to dataframe.')
+            # filter to freshness_df
+            freshness_df = freshness_df_full[freshness_df_full['chain'].isin(chain_batch)].copy()
 
-        # Track parse errors
-        parse_error_count = len(parse_errors_df) if not parse_errors_df.empty else 0
-        if parse_error_count > 0:
-            logger.info("JSON parse errors occurred for %s records. ", parse_error_count)
+            # update the dune freshness table
+            update_dune_freshness_table(freshness_df)
 
-        # upload the fresh dune data to bigquery
-        append_to_bigquery_table(freshness_df, transfers_df)
+            # generate the sql query needed to refresh the transfers table
+            update_chains = freshness_df['chain'].unique()
+            full_query = generate_net_transfers_update_query(update_chains)
+
+            # retrieve the fresh dune data using the generated query
+            transfers_json_df = get_fresh_dune_data(full_query)
+
+            # convert the json column into a df
+            transfers_df, parse_errors_df = parse_transfers_json(transfers_json_df)
+            # expand the json data into df columns
+            logger.info('completed translation from dune export json to dataframe.')
+            if not parse_errors_df.empty:
+                logger.info("JSON parse errors occurred for %s records. ", len(parse_errors_df))
+            parse_error_count = len(parse_errors_df) if not parse_errors_df.empty else 0
+
+            # upload the fresh dune data to bigquery
+            append_to_bigquery_table(freshness_df,transfers_df)
+
+            # Aggregate metrics
+            all_update_chains.extend(update_chains.tolist())
+            total_tokens_updated += len(freshness_df)
+            total_transfers_processed += len(transfers_json_df)
+            total_successful_transfers += len(transfers_df)
+            total_failed_parse_count += parse_error_count
+            all_freshest_dates.update(freshness_df.groupby('chain')['freshest_date'].max().to_dict())
+            if not parse_errors_df.empty:
+                all_parse_errors.extend(parse_errors_df.to_dict('records'))
 
         # Prepare return data
-        return {
+        return_data = {
             "status": "success",
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "processed": {
-                "chains": update_chains.tolist(),
-                "tokens_updated": len(freshness_df),
-                "total_transfers_processed": len(transfers_json_df),
-                "successful_transfers": len(transfers_df),
-                "failed_parse_count": parse_error_count
+                "chains": all_update_chains,
+                "tokens_updated": total_tokens_updated,
+                "total_transfers_processed": total_transfers_processed,
+                "successful_transfers": total_successful_transfers,
+                "failed_parse_count": total_failed_parse_count
             },
             "execution_details": {
-                "freshest_date_by_chain": freshness_df.groupby('chain')['freshest_date'].max().to_dict(),
-                "records_with_parse_errors": parse_errors_df.to_dict('records') if not parse_errors_df.empty else []
+                "freshest_date_by_chain": all_freshest_dates,
+                "records_with_parse_errors": all_parse_errors
             }
         }
+
+        return return_data
 
     except Exception as e:  # pylint: disable=broad-exception-caught
         error_message = str(e)
