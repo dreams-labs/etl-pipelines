@@ -587,21 +587,32 @@ def append_to_bigquery_table(freshness_df,transfers_df):
     returns:
         none
     """
-
     # Check if transfers_df is empty and terminate upload process if so
     if transfers_df.empty:
         logger.warning('No new wallet transfer data to append as transfers_df is empty.')
         return
 
-
     # map decimals data from bigquery onto the retrieved dune data
-    freshness_df.rename(columns={'token_address':'contract_address'},inplace=True)
-    transfers_df = pd.merge(
-        transfers_df,
-        freshness_df[['chain', 'contract_address', 'decimals']],
-        how='left',
-        on=['chain','contract_address']
+    freshness_df.rename(columns={'token_address':'contract_address'}, inplace=True)
+
+    # optimize merge performance with categorical conversion and indexing
+    transfers_df['contract_address'] = transfers_df['contract_address'].astype('category')
+    freshness_df['contract_address'] = freshness_df['contract_address'].astype('category')
+
+    # ensure both have same categories for proper merging
+    common_categories = pd.Categorical(
+        pd.concat([transfers_df['contract_address'], freshness_df['contract_address']]).unique()
     )
+    transfers_df['contract_address'] = transfers_df['contract_address'].cat.set_categories(common_categories.categories)
+    freshness_df['contract_address'] = freshness_df['contract_address'].cat.set_categories(common_categories.categories)
+
+    # create indexed lookup for faster joins
+    freshness_lookup = freshness_df[['chain', 'contract_address', 'decimals']].set_index(['chain', 'contract_address'])
+
+    # perform index-based join
+    transfers_df = transfers_df.set_index(['chain', 'contract_address'])
+    transfers_df = transfers_df.join(freshness_lookup, how='left')
+    transfers_df = transfers_df.reset_index()
 
     # reduce transfer amounts by applicable decimals
     transfers_df['daily_net_transfers'] = transfers_df['daily_net_transfers'] \
@@ -651,7 +662,7 @@ def append_to_bigquery_table(freshness_df,transfers_df):
         ,project_id=project_id
         ,if_exists='append'
         ,table_schema=schema
-        ,progress_bar=False
+        ,progress_bar=True
     )
     logger.info('appended upload df to %s.', table_name)
 
