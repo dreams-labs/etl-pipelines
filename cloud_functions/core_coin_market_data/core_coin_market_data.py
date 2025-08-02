@@ -85,6 +85,12 @@ def retrieve_raw_market_data():
             and volume > 0
         ),
 
+        dedupe_geckoterminal as (
+            select *
+            ,row_number() over (partition by md.geckoterminal_id,md.date order by md.updated_at asc) as rn
+            from etl_pipelines.coin_market_data_geckoterminal md
+        ),
+
         geckoterminal_market_data as (
             select md.date
             ,co.coin_id
@@ -97,8 +103,8 @@ def retrieve_raw_market_data():
             ,'geckoterminal' as data_source
             ,md.updated_at
             from core.coins co
-            join etl_pipelines.coin_market_data_geckoterminal md on md.geckoterminal_id = co.geckoterminal_id
-
+            join dedupe_geckoterminal md on md.geckoterminal_id = co.geckoterminal_id
+                and md.rn = 1
             -- filter out any coin_id-date pairs that already have records from coingecko
             left join coingecko_market_data on coingecko_market_data.coin_id = co.coin_id
                 and coingecko_market_data.date = md.date
@@ -108,7 +114,6 @@ def retrieve_raw_market_data():
         select * from coingecko_market_data
         union all
         select * from geckoterminal_market_data
-
         """
 
     market_data_df = dgc().run_sql(query_sql)

@@ -8,21 +8,22 @@ import pandas_gbq
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Base configuration
-DATASETS_FOLDER = "/Users/jeremymeadow/DreamsData/Local/datasets/"
-DATE_STR = '250617'
-PROJECT_ID = 'western-verve-411004'
 
 
-def process_crypto_global_market():
+# --------------------------------
+#          Main Interface
+# --------------------------------
+
+def process_crypto_global_market(datasets_folder, date_str, project_id):
     """Process and upload crypto global market data."""
-    folder = f"{DATASETS_FOLDER}macro_trends/crypto_global_market/{DATE_STR}"
+    folder = f"{datasets_folder}macro_trends/crypto_global_market/{date_str}"
 
     # Check folder contains exactly one file
     files = os.listdir(folder)
     if len(files) != 1:
         raise ValueError(f"Expected 1 file, found {len(files)}: {files}")
 
+    logger.info(f"Loading crypto global market file: {os.path.join(folder, files[0])}")
     # Load the file and validate required columns
     df = pd.read_csv(os.path.join(folder, files[0]))
     required_cols = ['market_cap', 'total_volume']
@@ -48,7 +49,7 @@ def process_crypto_global_market():
     logger.info("Prepared and validated crypto_global_market df")
 
     # Upload data
-    table_id = f"{PROJECT_ID}.macro_trends.crypto_global_market"
+    table_id = f"{project_id}.macro_trends.crypto_global_market"
     schema = [
         {'name': 'date', 'type': 'datetime'},
         {'name': 'market_cap', 'type': 'float'},
@@ -57,7 +58,7 @@ def process_crypto_global_market():
     pandas_gbq.to_gbq(
         df,
         table_id,
-        project_id=PROJECT_ID,
+        project_id=project_id,
         if_exists='replace',
         table_schema=schema,
         progress_bar=False
@@ -65,7 +66,91 @@ def process_crypto_global_market():
     logger.info(f"✓ Uploaded {len(df)} records to crypto_global_market table")
 
 
-def load_and_process_bitcoin_data(directory_path):
+def process_bitcoin_indicators(datasets_folder, date_str, project_id):
+    """Process and upload Bitcoin indicators data."""
+    directory_path = f"{datasets_folder}macro_trends/bitcoin_indicators/{date_str}"
+    df = _load_and_process_bitcoin_data(directory_path)
+
+    logger.info(f"Processed Bitcoin indicators data with shape {df.shape}")
+
+    # Upload data
+    table_id = f"{project_id}.macro_trends.bitcoin_indicators"
+    schema = [
+        {'name': 'date', 'type': 'datetime'},
+        {'name': 'btc_price', 'type': 'float'},
+        {'name': 'vdd_multiple', 'type': 'float'},
+        {'name': 'mvrv_z_score', 'type': 'float'}
+    ]
+    pandas_gbq.to_gbq(
+        df,
+        table_id,
+        project_id=project_id,
+        if_exists='replace',
+        table_schema=schema,
+        progress_bar=False
+    )
+    logger.info(f"✓ Uploaded {len(df)} records to bitcoin_indicators table")
+
+
+
+def process_google_trends(datasets_folder, date_str, project_id):
+    """Process and upload Google Trends data with incremental updates."""
+    file_path_pattern = f"{datasets_folder}macro_trends/google_trends/{date_str}/*.csv"
+    files = glob.glob(file_path_pattern)
+
+    if not files:
+        logger.warning(f"No CSV files found at {file_path_pattern}")
+        return
+
+    # Process all files and merge
+    dfs = [_process_google_trends_file(f) for f in files]
+    merged_df = pd.concat(dfs, axis=1)
+    merged_df = merged_df.loc[:, ~merged_df.columns.duplicated()]
+
+    logger.info(f"Processed {len(files)} Google Trends files with shape {merged_df.shape}")
+
+    # Get current data from BigQuery
+    query = "SELECT * FROM macro_trends.google_trends"
+    try:
+        current_df = pandas_gbq.read_gbq(query, project_id=project_id)
+
+        # Identify new records
+        new_records = merged_df[~merged_df['date'].isin(current_df['date'])]
+
+        if len(new_records) > 0:
+            logger.info(f"Found {len(new_records)} new records to append")
+
+            table_id = f"{project_id}.macro_trends.google_trends"
+            pandas_gbq.to_gbq(
+                new_records,
+                table_id,
+                project_id=project_id,
+                if_exists='append',
+                progress_bar=False
+            )
+            logger.info("✓ Google Trends table updated successfully")
+        else:
+            logger.info("No new records found - Google Trends table is current")
+
+    except Exception as e:
+        logger.warning(f"Could not query existing data, uploading all records: {e}")
+        table_id = f"{project_id}.macro_trends.google_trends"
+        pandas_gbq.to_gbq(
+            merged_df,
+            table_id,
+            project_id=project_id,
+            if_exists='replace',
+            progress_bar=False
+        )
+        logger.info(f"✓ Uploaded {len(merged_df)} records to google_trends table")
+
+
+
+# --------------------------------
+#         Helper Functions
+# --------------------------------
+
+def _load_and_process_bitcoin_data(directory_path):
     """
     Load and process Bitcoin indicator data from CSV files.
 
@@ -81,6 +166,7 @@ def load_and_process_bitcoin_data(directory_path):
     for filename in os.listdir(directory_path):
         if filename.endswith('.csv'):
             file_path = os.path.join(directory_path, filename)
+            logger.info(f"Loading Bitcoin indicator file: {file_path}")
             df = pd.read_csv(file_path)
             df['DateTime'] = pd.to_datetime(df['DateTime'])
             df.set_index('DateTime', inplace=True)
@@ -107,33 +193,7 @@ def load_and_process_bitcoin_data(directory_path):
     return combined_df.reset_index()
 
 
-def process_bitcoin_indicators():
-    """Process and upload Bitcoin indicators data."""
-    directory_path = f"{DATASETS_FOLDER}macro_trends/bitcoin_indicators/{DATE_STR}"
-    df = load_and_process_bitcoin_data(directory_path)
-
-    logger.info(f"Processed Bitcoin indicators data with shape {df.shape}")
-
-    # Upload data
-    table_id = f"{PROJECT_ID}.macro_trends.bitcoin_indicators"
-    schema = [
-        {'name': 'date', 'type': 'datetime'},
-        {'name': 'btc_price', 'type': 'float'},
-        {'name': 'vdd_multiple', 'type': 'float'},
-        {'name': 'mvrv_z_score', 'type': 'float'}
-    ]
-    pandas_gbq.to_gbq(
-        df,
-        table_id,
-        project_id=PROJECT_ID,
-        if_exists='replace',
-        table_schema=schema,
-        progress_bar=False
-    )
-    logger.info(f"✓ Uploaded {len(df)} records to bitcoin_indicators table")
-
-
-def process_google_trends_file(file_path):
+def _process_google_trends_file(file_path):
     """
     Process individual Google Trends CSV file.
 
@@ -143,6 +203,7 @@ def process_google_trends_file(file_path):
     Returns:
     - df (DataFrame): Processed Google Trends data.
     """
+    logger.info(f"Loading Google Trends file: {file_path}")
     df = pd.read_csv(file_path, skiprows=2)
     df.columns = df.columns.str.replace(': \(United States\)', '_us', regex=True)
     df.columns = df.columns.str.replace(': \(Worldwide\)', '_worldwide', regex=True)
@@ -152,73 +213,3 @@ def process_google_trends_file(file_path):
 
     return df
 
-
-def process_google_trends():
-    """Process and upload Google Trends data with incremental updates."""
-    file_path_pattern = f"{DATASETS_FOLDER}macro_trends/google_trends/{DATE_STR}/*.csv"
-    files = glob.glob(file_path_pattern)
-
-    if not files:
-        logger.warning(f"No CSV files found at {file_path_pattern}")
-        return
-
-    # Process all files and merge
-    dfs = [process_google_trends_file(f) for f in files]
-    merged_df = pd.concat(dfs, axis=1)
-    merged_df = merged_df.loc[:, ~merged_df.columns.duplicated()]
-
-    logger.info(f"Processed {len(files)} Google Trends files with shape {merged_df.shape}")
-
-    # Get current data from BigQuery
-    query = "SELECT * FROM macro_trends.google_trends"
-    try:
-        current_df = pandas_gbq.read_gbq(query, project_id=PROJECT_ID)
-
-        # Identify new records
-        new_records = merged_df[~merged_df['date'].isin(current_df['date'])]
-
-        if len(new_records) > 0:
-            logger.info(f"Found {len(new_records)} new records to append")
-
-            table_id = f"{PROJECT_ID}.macro_trends.google_trends"
-            pandas_gbq.to_gbq(
-                new_records,
-                table_id,
-                project_id=PROJECT_ID,
-                if_exists='append',
-                progress_bar=False
-            )
-            logger.info("✓ Google Trends table updated successfully")
-        else:
-            logger.info("No new records found - Google Trends table is current")
-
-    except Exception as e:
-        logger.warning(f"Could not query existing data, uploading all records: {e}")
-        table_id = f"{PROJECT_ID}.macro_trends.google_trends"
-        pandas_gbq.to_gbq(
-            merged_df,
-            table_id,
-            project_id=PROJECT_ID,
-            if_exists='replace',
-            progress_bar=False
-        )
-        logger.info(f"✓ Uploaded {len(merged_df)} records to google_trends table")
-
-
-# def main():
-#     """Execute the complete macro trends data pipeline."""
-#     logger.info("Starting macro trends data pipeline")
-
-#     try:
-#         process_crypto_global_market()
-#         process_bitcoin_indicators()
-#         process_google_trends()
-#         logger.info("✓ Pipeline completed successfully")
-
-#     except Exception as e:
-#         logger.error(f"Pipeline failed: {e}")
-#         raise
-
-
-# if __name__ == "__main__":
-#     main()
